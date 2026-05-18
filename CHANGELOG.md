@@ -11,8 +11,29 @@ While v0.x, **minor versions may include breaking changes**. From v1.0.0 onward,
 ## [Unreleased]
 
 ### Planned
-- `/kaizen:analyze` — deep audit (best-practices, dependencies, upgrades). Design phase next.
-- `/kaizen:learn` v0.4 — `--include-session` flag (analyze current Claude Code session for user corrections).
+- `/kaizen:plan` — turn spec doc into structured task tree (auto-planificador).
+- `/kaizen:preflight` — pre-PR chain (test → typecheck → lint → security → commit suggestion).
+- `/kaizen:analyze` v0.5 — additional modes: `--dependencies` (npm outdated, audit), `--security`, `--complexity`.
+- `/kaizen:learn` v0.5 — `--include-session` flag (analyze current Claude Code session for user corrections).
+
+---
+
+## [0.4.0] — 2026-05-18
+
+### Added
+- **New skill `/kaizen:analyze`**: read-only audit of the current project against its own `CLAUDE.md` and `.claude/rules/*`. Three modes (combinable):
+  - `--best-practices` — checks code for violations of stated conventions. Uses a built-in pattern library (10 known patterns covering JS/TS/Python common rules). Unmatched conventions are listed under "Unchecked" so users know what isn't verified.
+  - `--coverage` — identifies directories not covered by any path-scoped rule. Also flags stale rules whose `paths:` glob matches zero files.
+  - `--architecture` — compares the `## Architecture` section of `CLAUDE.md` to actual `src/*/`. Optionally checks Stack section against `package.json` dependencies for drift.
+- No-flag invocation runs all three modes.
+- `show` subcommand re-prints the last report.
+- Report written to `.claude/kaizen/analyze-report.md` (overwritten each run; gitignored).
+- **Documentation**: full coverage in `docs/architecture.md` (section 11), `docs/runtime-flow.md` (section 11), `docs/user-manual.md`. Per the docs-completeness commitment.
+
+### Design notes
+- **`/analyze` is independent of `/learn`**: produces only a report, never proposes mutations. The two skills are mirror images: `/learn` looks at git → proposes config; `/analyze` looks at current code → reports issues.
+- **Read-only by hard rule**: no Edit/Write to any file except `.claude/kaizen/analyze-report.md` and (one-time) `.gitignore`.
+- Modes not in v0.4 scope (deferred to v0.5+): `--dependencies`, `--security`, `--complexity`, `--upgrade <pkg>`.
 
 ---
 

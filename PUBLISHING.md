@@ -1,6 +1,6 @@
 # Publishing kaizen to GitHub
 
-> Step-by-step playbook to convert kaizen from a local-path marketplace into a public GitHub-hosted one. After this, anyone can install with `/plugin marketplace add alexruedadev/kaizen` and `/plugin install kaizen@kaizen` — no `--plugin-dir` hacks.
+> Step-by-step playbook to convert kaizen from a local-path marketplace into a public GitHub-hosted one. After this, anyone can install with `/plugin marketplace add alexdeploy/kaizen` and `/plugin install kaizen@kaizen` — no `--plugin-dir` hacks.
 
 **Run only when `/kaizen:learn` test is validated and you're ready for v0.3.0 to be the first public version.**
 
@@ -8,7 +8,7 @@
 
 ## Prerequisites
 
-- GitHub account: `alexruedadev` (matches what's already in `marketplace.json` and `plugin.json`).
+- GitHub account: `alexdeploy` (the GitHub username this repo is hosted under).
 - `gh` CLI installed and authenticated: `gh auth status` should show you logged in.
 - Clean working tree in `/Users/alex/Development/projects/kaizen/` (no uncommitted changes).
 
@@ -66,10 +66,10 @@ EOF
 
 ```bash
 # Create as public repo. If you want private, swap --public for --private.
-gh repo create alexruedadev/kaizen \
+gh repo create alexdeploy/kaizen \
   --public \
   --description "Bootstrap and continuous improvement for Claude Code projects — scaffolds .claude/, adapts to existing repos, evolves config as the project grows" \
-  --homepage "https://github.com/alexruedadev/kaizen" \
+  --homepage "https://github.com/alexdeploy/kaizen" \
   --source=. \
   --remote=origin \
   --push
@@ -78,7 +78,7 @@ gh repo create alexruedadev/kaizen \
 If `gh repo create` complains about an existing remote, use:
 
 ```bash
-git remote add origin git@github.com:alexruedadev/kaizen.git
+git remote add origin git@github.com:alexdeploy/kaizen.git
 git push -u origin main
 ```
 
@@ -107,7 +107,7 @@ Inside Claude Code:
 
 ```
 /plugin marketplace remove kaizen          # remove old local-path marketplace
-/plugin marketplace add alexruedadev/kaizen
+/plugin marketplace add alexdeploy/kaizen
 /plugin install kaizen@kaizen --scope project
 ```
 
@@ -127,7 +127,7 @@ Once published, the local-path install in [README.md](./README.md) is no longer 
 ## Install
 
 \`\`\`
-/plugin marketplace add alexruedadev/kaizen
+/plugin marketplace add alexdeploy/kaizen
 /plugin install kaizen@kaizen
 \`\`\`
 

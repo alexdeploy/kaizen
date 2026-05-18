@@ -4,3 +4,6 @@
 node_modules/
 .idea/
 .vscode/
+
+# Personal notes (not for the public repo)
+NOTES.md

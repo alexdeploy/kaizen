@@ -2,9 +2,10 @@
 
 > Decision trees, action sequences, and worked scenarios. Mermaid diagrams render in GitHub, VS Code (Markdown Preview Mermaid Support), and most modern markdown viewers.
 
-**Covers two skills:**
+**Covers three skills:**
 - **`/kaizen:init`** — sections 1–9 below.
-- **`/kaizen:learn`** — section 10 onward.
+- **`/kaizen:learn`** — section 10.
+- **`/kaizen:analyze`** — section 11 onward.
 
 For static structure see [architecture.md](./architecture.md). For end-user instructions see [user-manual.md](./user-manual.md).
 
@@ -624,3 +625,234 @@ Run `/kaizen:learn`:
 | `/kaizen:learn apply` | No — applies and deletes. Second invocation has nothing to apply. |
 | `/kaizen:learn discard` | Yes — deleting a missing file is a no-op. |
 | `/kaizen:learn --since=<X>` | Yes for the same X — analysis is deterministic given inputs. (Different X gives different proposals; that's signal, not bug.) |
+
+---
+
+# 11. `/kaizen:analyze` runtime
+
+## 11.1 Top-level sequence
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User
+    participant Claude as Claude Code
+    participant Skill as analyze/SKILL.md
+    participant Project as User project
+    participant Report as analyze-report.md
+
+    User->>Claude: /kaizen:analyze [flags]
+    Claude->>Skill: load SKILL.md
+    Claude->>Claude: parse args → modes
+    alt mode = show
+        Claude->>Report: Read analyze-report.md
+        alt missing
+            Claude->>User: ✗ "No report exists. Run /kaizen:analyze."
+        else exists
+            Claude->>User: print report verbatim
+        end
+    else mode = analyze (one or more flags)
+        Claude->>Project: Read CLAUDE.md (always)
+        Claude->>Project: Read .claude/rules/* (always)
+        opt --best-practices
+            Claude->>Project: Glob source files
+            Claude->>Project: Grep per pattern library entry
+            Claude->>Claude: collect violations + unchecked
+        end
+        opt --coverage
+            Claude->>Project: Glob source files
+            Claude->>Project: Parse rules' paths: frontmatter
+            Claude->>Claude: compute coverage per directory
+        end
+        opt --architecture
+            Claude->>Project: Glob src/*/
+            Claude->>Claude: diff documented vs actual
+            opt package.json present
+                Claude->>Project: Read package.json
+                Claude->>Claude: diff stack section vs deps
+            end
+        end
+        Claude->>Project: mkdir .claude/kaizen (if needed)
+        Claude->>Project: append .gitignore (one-time, if needed)
+        Claude->>Report: Write analyze-report.md (overwrite)
+        Claude->>User: console summary + path to full report
+    end
+```
+
+## 11.2 Decision tree (mode dispatch)
+
+```mermaid
+flowchart TD
+    Start([/kaizen:analyze invoked]) --> ParseArgs{Parse $ARGUMENTS}
+
+    ParseArgs -->|show| Show[Read .claude/kaizen/<br/>analyze-report.md]
+    Show --> ShowExists{File exists?}
+    ShowExists -->|no| ShowMiss[Print: 'No report exists'<br/>STOP]
+    ShowExists -->|yes| ShowPrint[Print contents verbatim]
+
+    ParseArgs -->|no flags| AllModes[Run all three:<br/>best-practices, coverage, architecture]
+    ParseArgs -->|specific flags| SelectedModes[Run only the selected modes]
+
+    AllModes --> ReadDocs[Read CLAUDE.md<br/>+ .claude/rules/*]
+    SelectedModes --> ReadDocs
+
+    ReadDocs --> BP{--best-practices?}
+    BP -->|yes| BPRun[Pattern library checks<br/>+ list unchecked conventions]
+    BP -->|no| COV
+    BPRun --> COV
+
+    COV{--coverage?}
+    COV -->|yes| COVRun[Glob source files<br/>+ parse rule paths<br/>+ compute coverage]
+    COV -->|no| ARCH
+    COVRun --> ARCH
+
+    ARCH{--architecture?}
+    ARCH -->|yes| ARCHRun[Diff CLAUDE.md Architecture<br/>vs src/*<br/>+ Stack vs package.json]
+    ARCH -->|no| Write
+    ARCHRun --> Write
+
+    Write[Write analyze-report.md] --> Print[Print console summary]
+    Print --> Done([DONE])
+
+    classDef stop fill:#fecaca,stroke:#dc2626;
+    classDef done fill:#dcfce7,stroke:#16a34a;
+    class ShowMiss stop;
+    class Done done;
+```
+
+## 11.3 `--best-practices` algorithm detail
+
+```mermaid
+flowchart TD
+    Start[Read CLAUDE.md + rules/*] --> Extract[Extract conventions from<br/>Conventions / Never do / Rules sections]
+    Extract --> ForEach{For each<br/>convention text}
+
+    ForEach --> Match{Match against<br/>pattern library<br/>by keyword}
+
+    Match -->|matched| RunCheck[Run the corresponding<br/>Grep / Glob check]
+    Match -->|no match| ListUnchecked[Add to 'Unchecked'<br/>section]
+
+    RunCheck --> Results{Violations found?}
+    Results -->|>0| ListViolations[List file:line entries<br/>cap at 20 with '+N more']
+    Results -->|0| ListClean[Record 'no violations'<br/>(for the summary count)]
+
+    ListViolations --> NextConv
+    ListClean --> NextConv
+    ListUnchecked --> NextConv
+
+    NextConv{More conventions?}
+    NextConv -->|yes| ForEach
+    NextConv -->|no| Compose[Compose 'Best practices' section<br/>of the report]
+```
+
+## 11.4 `--architecture` algorithm detail
+
+```mermaid
+flowchart LR
+    A[Read CLAUDE.md] --> B[Parse Architecture section<br/>extract listed dirs]
+    A --> C[Read Stack section<br/>extract listed libs/versions]
+    D[Glob src/*/] --> E[Build set of actual dirs]
+    F[Read package.json] --> G[Build set of declared deps]
+
+    B --> Diff1{Set diff:<br/>documented vs actual}
+    E --> Diff1
+
+    C --> Diff2{Set diff:<br/>listed libs vs deps}
+    G --> Diff2
+
+    Diff1 --> Out1[Listed-but-missing dirs]
+    Diff1 --> Out2[Exists-but-undocumented dirs]
+
+    Diff2 --> Out3[Listed-but-not-installed libs]
+    Diff2 --> Out4[Installed-but-not-listed libs]
+
+    Out1 --> Compose[Compose 'Architecture drift'<br/>section of the report]
+    Out2 --> Compose
+    Out3 --> Compose
+    Out4 --> Compose
+```
+
+## 11.5 Worked scenarios for `/kaizen:analyze`
+
+### Scenario A1 — first run on a project recently bootstrapped
+
+State: CLAUDE.md generated by `/kaizen:init` a week ago. Project has been actively developed since.
+
+Run `/kaizen:analyze` (no flags):
+
+1. Parse args → no flags → run all three modes.
+2. Read CLAUDE.md, .claude/rules/testing.md.
+3. **`--best-practices`**: extract 5 conventions. 3 match the pattern library:
+   - "Named exports only" → grep finds 2 violations (Vue SFCs explicitly excluded since CLAUDE.md notes the exception).
+   - "No `any`" → 4 violations across 3 files.
+   - "No `console.log`" → 0 violations.
+   - 2 remaining conventions ("Errors are typed", "Tests next to source") added to Unchecked.
+4. **`--coverage`**: project has 47 source files; only `tests/**` rule. 92% of files uncovered. Lists low-coverage dirs.
+5. **`--architecture`**: CLAUDE.md lists 9 src dirs; actual src has 11. Two new dirs (`composables/`, `services/`) flagged. Stack section: 1 lib removed from package.json since last init.
+6. Write report. Console:
+   ```
+   ✓ kaizen analyze: 3 modes run
+
+   Findings:
+     - Best practices: 6 violations across 5 files (2 unchecked)
+     - Coverage: 1 directory low-coverage, 0 stale rules
+     - Architecture: 0 documented-missing, 2 exists-undocumented, 1 stack drift
+
+   Full report: .claude/kaizen/analyze-report.md
+   ```
+
+### Scenario A2 — focused single-mode run
+
+Run `/kaizen:analyze --architecture` only:
+
+1. Skip best-practices and coverage entirely (faster, less context).
+2. Just compares Architecture + Stack against reality.
+3. Report contains only the `## Architecture drift` section. Best practices / coverage sections **omitted entirely** (not "empty" — absent).
+4. Console summary mentions only architecture line.
+
+### Scenario A3 — `show` after time has passed
+
+User ran `/kaizen:analyze` 2 days ago; comes back to the project.
+
+Run `/kaizen:analyze show`:
+
+1. Mode `show` is exclusive — ignores any other flags.
+2. Read `.claude/kaizen/analyze-report.md`.
+3. Print contents verbatim. No re-analysis.
+
+Useful for "what did I find yesterday?" without paying for a fresh analysis.
+
+### Scenario A4 — pattern library has no match
+
+Edge case: user wrote CLAUDE.md with very project-specific conventions that don't match any pattern keyword.
+
+Run `/kaizen:analyze --best-practices`:
+
+1. Extract 6 conventions.
+2. **0 match** the pattern library.
+3. All 6 listed under "Unchecked (manual review)".
+4. Report contains the Unchecked section + a Suggestions block: "Pattern library v0.4 covers 10 common keywords; consider rewording your conventions to match (e.g., 'Use named exports only' matches; 'Always export by name' does not)."
+
+This is a feature: kaizen tells you what it CAN'T verify, instead of silently passing.
+
+## 11.6 Idempotency
+
+| Action | Idempotent? |
+|---|---|
+| `/kaizen:analyze` (no flags) | **Yes** — same project state gives same report. Overwrites the file. |
+| `/kaizen:analyze --<modes>` | Yes for the same flags. |
+| `/kaizen:analyze show` | Yes — pure read. |
+
+Re-running is always safe. No state machine to worry about. The report file is the only output; overwriting is by design.
+
+## 11.7 Comparison: `/kaizen:init` vs `/learn` vs `/analyze`
+
+| Aspect | `/init` | `/learn` | `/analyze` |
+|---|---|---|---|
+| Direction | Forward (bootstrap from nothing) | Forward (propose new config from git history) | Backward (audit current code against existing config) |
+| Reads | Project structure, package.json, kaizen-detect output | CLAUDE.md, rules, git log/diff | CLAUDE.md, rules, source files, package.json |
+| Writes | Many files (CLAUDE.md, settings, rules, agents, hooks) | `pending.md` (proposals); CLAUDE.md/rules only via `apply` | `analyze-report.md` only |
+| Has state machine? | No (one-shot) | Yes (no-pending ↔ has-pending) | No (one-shot) |
+| Can mutate config? | Yes (always) | Yes (via `apply` subcommand only) | **Never** |
+| Output drift report? | Yes (per-file) | Yes (per-proposal evidence) | The report IS the output |
+| Future signal sources | More stack presets (v0.4+) | Session conversation (v0.5), auto-memory (v0.6) | `--dependencies`, `--security`, `--complexity` (v0.5+) |

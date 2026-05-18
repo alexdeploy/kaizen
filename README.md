@@ -3,16 +3,17 @@
 > 改善 (kaizen) = continuous improvement.
 > A Claude Code plugin that scaffolds a complete, adapted `.claude/` setup for any project — empty or existing — and (in future versions) evolves it as the project grows.
 
-## What it does today (v0.3.0)
+## What it does today (v0.4.0)
 
 - `/kaizen:init` — analyzes your project (stack, maturity, git state, existing config) and generates a tailored `CLAUDE.md`, `.claude/settings.json`, path-scoped rules, a code-reviewer agent, and hooks. Works on **empty and existing** projects. Outputs a per-file drift report so you know exactly what was customized.
-- `/kaizen:learn` — analyzes recent git activity and proposes updates to `CLAUDE.md` / `.claude/rules/`. Writes proposals to `.claude/kaizen/pending.md` for you to review. Subcommands: `show`, `apply`, `discard`. **Never modifies your config without explicit approval.**
+- `/kaizen:learn` — analyzes recent git activity and proposes updates to `CLAUDE.md` / `.claude/rules/`. Writes proposals to `.claude/kaizen/pending.md` for review. Subcommands: `show`, `apply`, `discard`. **Never modifies your config without explicit approval.**
+- `/kaizen:analyze` — read-only audit of the project against its own conventions and rules. Three modes (combinable): `--best-practices` (code violations of stated rules), `--coverage` (dirs not covered by any rule), `--architecture` (CLAUDE.md vs actual `src/*/` drift). Writes report to `.claude/kaizen/analyze-report.md`. **Never modifies anything.**
 
 ## What's coming next
 
-- `/kaizen:analyze` — deep audit (best-practices, dependencies, upgrades).
 - `/kaizen:plan` — turn a spec doc into a structured task tree.
 - `/kaizen:preflight` — pre-PR chain (test → typecheck → lint → security → commit msg).
+- `/kaizen:analyze` v0.5+ — additional modes: `--dependencies`, `--security`, `--complexity`.
 
 ## Repo layout
 
@@ -34,8 +35,10 @@ kaizen/
             │       ├── generic/
             │       ├── typescript-node/
             │       └── python/
-            └── learn/
-                └── SKILL.md                  ← /kaizen:learn entrypoint (analyze/show/apply/discard)
+            ├── learn/
+            │   └── SKILL.md                  ← /kaizen:learn entrypoint (analyze/show/apply/discard)
+            └── analyze/
+                └── SKILL.md                  ← /kaizen:analyze entrypoint (--best-practices/--coverage/--architecture/show)
 ```
 
 ## Local development
@@ -67,10 +70,10 @@ You should see a JSON payload with `stack`, `package_manager`, `maturity`, `git`
 ## Publishing (when ready)
 
 1. `git init && git add . && git commit -m "v0.1.0 - init skill"`.
-2. Push to GitHub: `git remote add origin git@github.com:alexruedadev/kaizen.git && git push -u origin main`.
+2. Push to GitHub: `git remote add origin git@github.com:alexdeploy/kaizen.git && git push -u origin main`.
 3. Users add the marketplace once:
    ```
-   /plugin marketplace add alexruedadev/kaizen
+   /plugin marketplace add alexdeploy/kaizen
    /plugin install kaizen@kaizen
    ```
    Then restart Claude Code so the new skills/agents are loaded.

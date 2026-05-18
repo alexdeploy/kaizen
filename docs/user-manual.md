@@ -17,7 +17,7 @@ For internal architecture, see [architecture.md](./architecture.md). For decisio
 Clone or pull the kaizen repo, then load it directly with `--plugin-dir`:
 
 ```bash
-git clone https://github.com/alexruedadev/kaizen.git ~/kaizen
+git clone https://github.com/alexdeploy/kaizen.git ~/kaizen
 cd /path/to/your/project
 claude --plugin-dir ~/kaizen/plugins/kaizen
 ```
@@ -32,7 +32,7 @@ Inside Claude Code, the skill is now available:
 
 ```bash
 # Inside Claude Code, once:
-/plugin marketplace add alexruedadev/kaizen
+/plugin marketplace add alexdeploy/kaizen
 /plugin install kaizen@kaizen
 ```
 
@@ -62,9 +62,10 @@ You'll see Claude run `detect.sh`, report what it found, and either generate fil
 
 ## Command reference
 
-Commands shipped in v0.3.0:
+Commands shipped in v0.4.0:
 - [`/kaizen:init`](#kaizeninit-arguments) — bootstrap project config
 - [`/kaizen:learn`](#kaizenlearn-arguments) — propose config updates from git activity
+- [`/kaizen:analyze`](#kaizenanalyze-arguments) — read-only audit of code vs. stated rules
 
 ### `/kaizen:init [arguments]` {#kaizeninit-arguments}
 
@@ -279,6 +280,93 @@ See the [SKILL.md source](../plugins/kaizen/skills/learn/SKILL.md) for the full 
 - **Validates before applying**: if a proposal's target section no longer exists, the whole apply stops with a clear error.
 - **Never auto-commits**. Changes land in your working tree; you commit when ready.
 
+### `/kaizen:analyze [flags] [show]` {#kaizenanalyze-arguments}
+
+Read-only audit of the current project against its own `CLAUDE.md` and `.claude/rules/*`. Surfaces three kinds of mismatches: best-practice violations, documentation coverage gaps, and architecture drift. **Never modifies any file** other than the report itself.
+
+#### Modes (combinable; no flag = run all three)
+
+| Flag | What it checks |
+|---|---|
+| `--best-practices` | Violations of conventions stated in CLAUDE.md / rules. Uses a built-in pattern library; unmatched conventions are listed as "Unchecked". |
+| `--coverage` | Directories with <20% of files matched by any path-scoped rule. Also flags stale rules whose `paths:` matches no files. |
+| `--architecture` | Compares the `## Architecture` section of CLAUDE.md to actual `src/*/`. Also compares Stack section to `package.json` dependencies. |
+| `show` | Re-prints the last generated report. Exclusive — ignores other flags. |
+
+#### Built-in pattern library (v0.4)
+
+`--best-practices` can automatically verify these conventions when their keywords appear in CLAUDE.md / rules:
+
+| Convention keyword | Check |
+|---|---|
+| `named exports only`, `no default exports` | Grep for `^export default` in source files |
+| `no console.log` | Grep for `console\.log` outside tests |
+| `no any` (TypeScript) | Grep for `: any` and `as any` outside `.d.ts` |
+| `no eslint-disable` (without comment) | Grep for `eslint-disable` lacking inline justification |
+| `no print() for logging` (Python) | Grep for `print(` outside tests/scripts |
+| `no bare except` (Python) | Grep for `except:` |
+| `no wildcard imports` (Python) | Grep for `from x import *` |
+| `no mutable default arguments` (Python) | Grep for `def f(x=[])` and `def f(x={})` |
+| `tests next to source` | Reports source files without a sibling `*.test.*` |
+
+Conventions that don't match any keyword are reported as **"Unchecked — manual review"**, so you always know what kaizen can and can't verify automatically.
+
+#### Typical workflow
+
+```
+# Full audit:
+/kaizen:analyze
+
+# Just check architecture drift:
+/kaizen:analyze --architecture
+
+# Best practices + coverage, skip architecture:
+/kaizen:analyze --best-practices --coverage
+
+# Re-display the last report (after some time has passed):
+/kaizen:analyze show
+```
+
+#### Where the report lives
+
+`.claude/kaizen/analyze-report.md`. The file is **overwritten on every run** (it's output, not state). The `.claude/kaizen/` directory is auto-gitignored (shared with `/kaizen:learn`'s `pending.md`).
+
+#### Report format (excerpt)
+
+```markdown
+# kaizen :: analyze report
+
+Generated: 2026-05-18T16:42:01Z
+Modes run: --best-practices, --coverage, --architecture
+
+## Best practices
+### 3 violations of "No console.log in committed code" (CLAUDE.md:35)
+- `src/services/auth.ts:108`
+- `src/utils/logger.ts:24`
+- `src/components/Debug.vue:42`
+
+### Unchecked conventions
+- "Errors are typed. Throw Error subclasses, not strings." — no automated check
+
+## Documentation coverage
+### Directories with low rule coverage
+- `src/composables/` — 0/12 files covered
+
+## Architecture drift
+### Exists in src/ but not documented
+- `src/composables/` — 12 files
+
+## Suggestions
+- Add a `.claude/rules/composables.md` with `paths: ["src/composables/**"]`.
+```
+
+#### Limits and safety
+
+- **Read-only** by hard rule. Cannot Edit/Write anything except the report file and (one-time) `.gitignore`.
+- **No auto-fix**. Findings are surfaced; action is the user's call.
+- **Bounded output**. If a check returns >50 matches, only the first 20 are listed with a `+N more` summary.
+- **No external tool dependencies**. v0.4 doesn't shell out to `npm`/`pip`/etc. — that's deferred to v0.5+ (`--dependencies`).
+
 ## Troubleshooting
 
 ### "Skill `/kaizen:init` not found"
@@ -374,4 +462,4 @@ Edit the generated files directly. They're yours now. kaizen won't touch them ag
 
 - Architecture detail: [architecture.md](./architecture.md)
 - Decision flow with diagrams: [runtime-flow.md](./runtime-flow.md)
-- Issue tracker: https://github.com/alexruedadev/kaizen/issues
+- Issue tracker: https://github.com/alexdeploy/kaizen/issues

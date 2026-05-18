@@ -2,11 +2,12 @@
 
 > How the plugin works once it's installed and a user invokes a command. This document is about runtime behavior, not about how to develop kaizen itself.
 
-**This document covers two skills (v0.3.0):**
+**This document covers three skills (v0.4.0):**
 - `/kaizen:init` — bootstrap a project's Claude Code config. Sections 1-8 below.
-- `/kaizen:learn` — propose updates to that config based on git activity. Section 9 onward.
+- `/kaizen:learn` — propose updates to that config based on git activity. Section 9.
+- `/kaizen:analyze` — read-only audit of code against the config. Section 11.
 
-Both skills share the same plugin tree and runtime model. They differ in what they read, what they write, and the directives that govern each.
+All three skills share the same plugin tree and runtime model. They differ in what they read, what they write, and the directives that govern each. `/init` and `/learn` can mutate config (the former generates, the latter applies user-approved proposals); `/analyze` is strictly read-only.
 
 ## Mental model
 
@@ -427,3 +428,157 @@ Five deliberate choices specific to `/learn`:
 3. **Apply is transactional-ish, not auto-apply.** Even if a user types `/kaizen:learn apply` immediately after the analyze, apply re-reads `pending.md` and validates each target. There's no in-session "memory" of what was just analyzed.
 4. **Git only in v0.3 for predictability.** Other signal sources (session, auto-memory) are documented in the SKILL.md roadmap but explicitly out of scope. Each future addition is a separate opt-in flag, never default.
 5. **No subagents.** `/learn` runs entirely in the user's main session so they can interrupt mid-analysis. Cheap, transparent, easy to debug.
+
+---
+
+# 11. `/kaizen:analyze` runtime (v0.4.0+)
+
+> Read-only diagnostic. Mirror skill to `/learn`: where `/learn` watches git and proposes config changes, `/analyze` watches **current code** and reports issues against the existing config.
+
+## Mental model — strict read-only
+
+```
+┌─────────────────────────────┐       ┌─────────────────────────────┐
+│  PLUGIN TREE (read-only)    │       │  USER PROJECT (read-only)   │
+│  ~/.claude/plugins/cache/   │ reads │  $CLAUDE_PROJECT_DIR        │
+│                             │ ────▶ │                             │
+│  • SKILL.md (instructions)  │       │  • CLAUDE.md                │
+│                             │       │  • .claude/rules/*          │
+│                             │       │  • source files (src/...)   │
+│                             │       │  • package.json (optional)  │
+└─────────────────────────────┘       └─────────────────────────────┘
+                                                  │
+                                                  │ writes ONLY to one file
+                                                  ▼
+                                       ┌─────────────────────────────┐
+                                       │  REPORT (overwritten)       │
+                                       │  .claude/kaizen/            │
+                                       │    analyze-report.md        │
+                                       │  (auto-gitignored)          │
+                                       └─────────────────────────────┘
+```
+
+Unlike `/init` (writes config) and `/learn` (writes pending, optionally applies), `/analyze` writes **exactly one file**: the report. No source code is touched. No CLAUDE.md is touched. No state machine — every run is independent.
+
+## Components
+
+| Component | Type | Lifetime | Purpose |
+|---|---|---|---|
+| [`skills/analyze/SKILL.md`](../plugins/kaizen/skills/analyze/SKILL.md) | LLM prompt | Loaded into context when `/kaizen:analyze` is invoked | Mode dispatch + pattern library + per-mode algorithms + report writer |
+| `analyze-report.md` | Markdown file | Overwritten on every run | Persistent output for re-reading via `show` or for sharing |
+
+No helper scripts. All logic is in SKILL.md + standard tools (`Read`, `Write`, `Glob`, `Grep`, `Bash(test|ls|cat|wc|mkdir)`).
+
+## Modes (combinable)
+
+| Flag | Reads | Reports |
+|---|---|---|
+| `--best-practices` | `CLAUDE.md`, `.claude/rules/*`, all source files | Violations of stated conventions, by file:line. Plus "Unchecked" list for conventions outside the pattern library. |
+| `--coverage` | `.claude/rules/*` (parses `paths:` frontmatter), all source files | Directories with <20% rule coverage. Stale rules (paths match no files). Always-loaded rules. |
+| `--architecture` | `CLAUDE.md` (`## Architecture` section), `src/*/`, optionally `package.json` | Documented-but-missing dirs, exists-but-undocumented dirs. Stack section drift vs package.json. |
+| *(none)* | All of the above | All three sections in one report |
+| `show` | `analyze-report.md` | Re-prints last report. No analysis performed. |
+
+## Built-in pattern library (`--best-practices` v0.4)
+
+Conventions verified automatically when matched by keyword in CLAUDE.md / rules:
+
+```
+named exports only      → grep ^export default
+no console.log          → grep console\.log (excluding tests)
+no any                  → grep ': any\b' and 'as any\b' (TS)
+no eslint-disable       → grep eslint-disable lacking inline justification
+no print() for logging  → grep ^print( (Python, excl. tests/scripts/__main__)
+no bare except          → grep except\s*:\s*$ (Python)
+no wildcard imports     → grep 'from .* import \*' (Python)
+no mutable defaults     → grep 'def f([^)]*=\[\]' / '=\{\}' (Python)
+tests next to source    → for each .ts file, check sibling *.test.* exists
+```
+
+Conventions NOT matching any keyword are listed explicitly under **"Unchecked (manual review)"**. This is a feature, not a limitation: users see exactly what kaizen verifies vs. what they need to inspect themselves.
+
+## Report schema
+
+Always at `.claude/kaizen/analyze-report.md`. Overwritten on every run.
+
+```markdown
+# kaizen :: analyze report
+
+Generated: <ISO 8601>
+Plugin version: <v>
+Modes run: <list>
+
+---
+
+## Best practices
+[Section per --best-practices; omitted if mode not run]
+
+## Documentation coverage
+[Section per --coverage; omitted if mode not run]
+
+## Architecture drift
+[Section per --architecture; omitted if mode not run]
+
+---
+
+## Suggestions
+[Specific, evidence-based, actionable. Omitted if nothing to suggest.]
+```
+
+Console summary printed alongside the file write — concise, with counts per mode.
+
+## Boundaries
+
+**`/analyze` reads**:
+- `CLAUDE.md` (always)
+- `.claude/rules/*` (always)
+- Source files via Glob (project-defined extensions)
+- `package.json` (optional, for `--architecture` stack drift)
+- `.claude/kaizen/analyze-report.md` (only in `show` mode)
+
+**`/analyze` writes**:
+- `.claude/kaizen/analyze-report.md` (overwritten on every run)
+- `.gitignore` (only if `.claude/kaizen/` not yet ignored — one-time append, same logic as `/learn`)
+
+**`/analyze` never touches**:
+- Source code.
+- `CLAUDE.md`, `.claude/rules/*`, `.claude/settings.json`, any other config.
+- `package.json` or dependency manifests.
+- Anything outside `$CLAUDE_PROJECT_DIR`.
+- `pending.md` from `/learn` (independence).
+
+## Relationship to `/learn`
+
+Deliberately **decoupled** in v0.4:
+
+| Aspect | `/learn` | `/analyze` |
+|---|---|---|
+| Input | Git history (commits, diffs) | Current files (source + config) |
+| Output | `.claude/kaizen/pending.md` (proposals) | `.claude/kaizen/analyze-report.md` (findings) |
+| Can mutate? | Yes, via `/learn apply` | No, ever |
+| State machine | Yes (no-pending ↔ has-pending) | None |
+| Shared `.claude/kaizen/` dir | Yes | Yes |
+
+The user can read the analyze report and then run `/learn` to formalize fixes — but kaizen never automates that bridge. Decoupling is the v0.4 contract; future versions may add an opt-in `--feed-to-learn` flag if usage patterns justify it.
+
+## Failure modes
+
+| Failure | Behavior |
+|---|---|
+| `CLAUDE.md` missing | Refuse all modes. Suggest `/kaizen:init` first. |
+| `.claude/rules/` missing | `--coverage` notes "no rules to check against". Other modes proceed. |
+| No source files match | `--coverage` / `--architecture` report "No source files detected". `--best-practices` proceeds with empty result set. |
+| Not a git repo | All modes work without git. No refusal. |
+| Pattern library has no match | `--best-practices` reports ALL conventions as Unchecked. Still produces report. |
+| `package.json` missing | `--architecture` skips Stack drift sub-check, notes in report. |
+| Grep returns >50 matches | Lists first 20 with "+N more". Bounded. |
+
+## Why this design
+
+Five deliberate choices specific to `/analyze`:
+
+1. **Read-only is the contract, not a side-effect.** Diagnostic and surgery are different jobs. Coupling them is how tools become bossy and lose user trust.
+2. **Pattern library over LLM-everything.** Checking "no console.log" should be a `Grep` call, not "Claude reads every file and judges". Patterns are auditable, fast, and reproducible.
+3. **Unchecked conventions are explicit.** Silently skipping unverifiable rules would hide kaizen's limitations. Listing them tells the user: "these need eyes."
+4. **Single output file, overwritten.** No archive of past reports. Reports are diagnostic snapshots; you take a new one when you want a new snapshot. Archiving adds complexity for little gain.
+5. **No state machine.** Unlike `/learn`, there's nothing to gate — every run is read-only and idempotent. The simplicity is deliberate.
