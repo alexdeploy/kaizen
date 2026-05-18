@@ -1063,4 +1063,27 @@ Six choices specific to `/plan`:
 3. **Plans accumulate, reports overwrite.** Diagnostics are snapshots; plans are durable artifacts. Different lifecycle.
 4. **Per-task annotation, not just titles.** Type, complexity, impact areas, dependencies, risks, criteria. Modern planning tools converge on this richness because tasks without it are wishes.
 5. **Dependency-ordered output.** Decomposer returns spec-order; orchestrator reorders by dependencies. The plan reads as an execution order.
-6. **Strict read-only, never executes.** v0.7+ may add `--execute` as a separate concern (autonomy boundaries, checkpointing) — premature in v0.6.
+6. **Strict read-only, never executes.** Even with `--seed-todos` (v0.9), the skill never executes the plan — it only pushes tasks into TodoWrite (a session-scoped tracking list, not an execution engine). `--execute` for actual autonomous task running remains deferred (autonomy boundaries, checkpointing, rollback strategy all need design work).
+
+## Input methods (v0.9+)
+
+`/plan` accepts the spec from three mutually exclusive sources:
+
+| Source | Mechanism | Use case |
+|---|---|---|
+| File path | `Read` tool on the path; auto-convert binary formats if `pdftotext`/`pandoc` on PATH | Persistent specs in the repo, official feature specs, refactor proposals |
+| `--from-prompt="..."` | Use the quoted string directly as spec content | Quick ad-hoc planning, no spec file overhead |
+| `--from-issue=<N>` | `gh issue view <N>` (body + comments) | Issue-driven workflow, GitHub-native projects |
+
+Exactly one must be specified — multiple is an error. The plan filename slug derives from the source: file basename, slugified prompt prefix, or `issue-<N>`.
+
+**Auto-conversion** is a v0.9 addition that removes the "you have to convert to .txt first" friction for binary formats. The converted file persists at `.claude/kaizen/converted/<basename>.txt` (or `.md`) so users can:
+- Inspect what kaizen actually extracted (useful for diagnosing decomposer failures)
+- Re-run without re-converting (idempotent for unchanged inputs)
+- Edit the conversion by hand if the extraction was poor (then re-run on the converted file directly)
+
+## TodoWrite integration (v0.9+)
+
+With `--seed-todos`, after writing the plan file, the skill calls TodoWrite to push each plan task as a `pending` entry. This bridges the plan-as-artifact (persistent) with TodoWrite (session-scoped execution tracking).
+
+**Important distinction**: plans are the durable artifact; TodoWrite is the in-session tracker. The user must explicitly opt in with `--seed-todos` because TodoWrite entries don't survive session ends — they're meant for active work, not project memory.

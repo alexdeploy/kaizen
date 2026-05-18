@@ -1,8 +1,8 @@
 ---
-description: Auto-planner — reads a spec document and produces a structured, dependency-ordered task tree. Dispatches plan-context and plan-decomposer agents in parallel, then synthesizes their outputs into an annotated plan written to .claude/kaizen/plans/.
+description: Auto-planner — reads a spec (file, inline prompt, or GitHub issue) and produces a structured, dependency-ordered task tree. Auto-converts PDF/DOCX when pdftotext/pandoc are available. Dispatches plan-context and plan-decomposer agents in parallel, then synthesizes into an annotated plan. Optionally seeds TodoWrite.
 disable-model-invocation: true
-argument-hint: "<path-to-spec.md> [list|show <plan-id>]"
-allowed-tools: Read, Write, Glob, Grep, Bash(test *), Bash(ls *), Bash(cat *), Bash(file *), Bash(mkdir *), Bash(date *), Bash(wc *), Bash(head *), Task
+argument-hint: "<path-to-spec> | --from-prompt=\"...\" | --from-issue=<N> [--seed-todos] [list|show <plan-id>]"
+allowed-tools: Read, Write, Glob, Grep, Bash(test *), Bash(ls *), Bash(cat *), Bash(file *), Bash(mkdir *), Bash(rm *), Bash(date *), Bash(wc *), Bash(head *), Bash(command -v *), Bash(which *), Bash(pdftotext *), Bash(pandoc *), Bash(gh issue view *), Task, TodoWrite
 ---
 
 # /kaizen:plan
@@ -15,18 +15,21 @@ The architectural shape mirrors `/preflight`: a 4-phase execution with two paral
 
 ## Arguments
 
+Exactly **one source** is required (file path, inline prompt, or gh issue). Flags can combine.
+
 | Arg | Meaning |
 |---|---|
-| `<path-to-spec>` | **Required** for plan generation. Path to a text-format spec document (markdown, txt, rst, adoc, plain). |
-| `list` | List all plans in `.claude/kaizen/plans/` with timestamps. |
-| `show <plan-id>` | Print a specific plan verbatim. `<plan-id>` is the filename without `.md` extension, or `latest` for the most recent. |
+| `<path-to-spec>` | Path to a text-format spec document (markdown, txt, rst, adoc, plain). Binary formats (PDF, DOCX) **auto-converted** when `pdftotext`/`pandoc` is on PATH (v0.9+); otherwise rejected with conversion suggestion. |
+| `--from-prompt="..."` | Inline prompt as the spec content. Useful for quick ad-hoc planning. Skill slugifies the first ~40 chars for the filename. |
+| `--from-issue=<N>` | Fetch a GitHub issue via `gh issue view <N>`. Body + comments form the spec. Requires `gh` CLI installed and authenticated. |
+| `--seed-todos` | After writing the plan file, also push each task into TodoWrite. Tasks land as todo entries in the current session for immediate execution. **Use only when you intend to start executing now** — TodoWrite is session-scoped, not project-scoped. |
+| `list` | List all plans in `.claude/kaizen/plans/` with timestamps. Exclusive — ignores other args. |
+| `show <plan-id>` | Print a specific plan verbatim. `<plan-id>` is the filename without `.md` extension, or `latest` for the most recent. Exclusive. |
 
-Future args planned for v0.7+ (DO NOT implement in v0.6):
-- `--from-issue=<N>` (gh issue)
-- `--from-prompt="..."` (inline)
-- `--scope=<area>` (limit scope to a directory)
-- `--depth=<shallow|medium|deep>` (control granularity)
-- `--seed-todos` (push to TodoWrite)
+Future args planned for v0.10+ (DO NOT implement in v0.9):
+- `--scope=<area>` (limit decomposition to a directory)
+- `--depth=<shallow|medium|deep>` (granularity control)
+- `--execute` (autonomy boundaries needed first)
 
 ---
 
@@ -54,7 +57,18 @@ If not found: print error with available plan IDs. Otherwise print the file verb
 
 The argument is `<path-to-spec>`. Run the 4 phases below.
 
-### Phase 0: validate input
+### Phase 0: resolve and validate input
+
+Determine the **input source** (exactly one must be specified):
+
+| `$ARGUMENTS` contains | Source resolution |
+|---|---|
+| `--from-prompt="..."` | Use the quoted string as the spec content directly. Slug = first ~40 chars (slugified). Skip file/conversion logic. |
+| `--from-issue=<N>` | Run `gh issue view <N>` (must have `gh` available). Concatenate body + comments as spec content. Slug = `issue-<N>`. |
+| `<path>` (no other source flag) | Treat as file path. Continue with steps below. |
+| none / multiple sources | Stop with `✗ kaizen plan: specify exactly one of <path>, --from-prompt, --from-issue.` |
+
+For **file path** input:
 
 1. Verify the file exists: `test -f "$spec_path"`. If not, error and stop.
 
@@ -62,28 +76,48 @@ The argument is `<path-to-spec>`. Run the 4 phases below.
 
 | Extension | Action |
 |---|---|
-| `.pdf` | **STOP** with conversion suggestion (see below) |
-| `.docx`, `.doc`, `.odt`, `.rtf`, `.pages` | **STOP** with conversion suggestion |
-| `.epub`, `.mobi` | **STOP** with conversion suggestion |
+| `.pdf` | **Auto-convert** if `pdftotext` is on PATH (see below); else STOP with conversion suggestion |
+| `.docx`, `.doc` | **Auto-convert** if `pandoc` is on PATH; else STOP with conversion suggestion |
+| `.odt`, `.rtf`, `.epub`, `.mobi` | **Auto-convert** if `pandoc` is on PATH; else STOP |
+| `.pages` | STOP with conversion suggestion (no good auto-converter) |
 | any other | proceed (try to read) |
 
-**Conversion suggestion message** (use the appropriate one):
+3. **Auto-conversion** (v0.9+):
 
-```
-✗ kaizen plan: detected <format> input — kaizen v0.6 cannot extract text from <format>.
+   Check tool availability:
+   ```bash
+   command -v pdftotext   # for PDFs
+   command -v pandoc      # for DOCX/ODT/RTF/EPUB/MOBI
+   ```
 
-  Convert it first and re-run:
-    PDF:  brew install poppler && pdftotext <file> <file>.txt    (macOS)
-          sudo apt install poppler-utils && pdftotext <file> <file>.txt    (Linux)
-    DOCX: pandoc <file> -o <file>.md
-    Other: any tool that produces plain text / markdown
+   If the appropriate tool is **present**:
+   - Ensure target dir: `mkdir -p .claude/kaizen/converted`.
+   - Convert: write to `.claude/kaizen/converted/<basename-with-original-ext>.txt`.
+     - PDF: `pdftotext -layout "<input>" "<output>"`
+     - DOCX/ODT/RTF/EPUB/MOBI: `pandoc "<input>" -o "<output>.md"` (markdown output is best)
+   - **Use the converted file as the spec** for the rest of the pipeline.
+   - **Persist the conversion** (don't delete) so the user can inspect what kaizen extracted. Add `.claude/kaizen/converted/` to .gitignore via the usual one-time append logic.
+   - In the plan header, note: `Spec source: <original> (auto-converted via <tool> → <converted-path>)`.
 
-  Then: /kaizen:plan <converted-file>
-```
+   If the tool is **absent**, stop with the conversion suggestion message (which now mentions auto-conversion as an alternative):
 
-3. Read the file with the Read tool. If the read succeeds but the content appears to have many non-printable characters (high ratio of bytes outside printable ASCII + common Unicode), treat as binary too and surface the same conversion message.
+   ```
+   ✗ kaizen plan: detected <format> input — no auto-converter found.
 
-4. **Bound input size**: if the spec is >2000 lines (or >100 KB), warn the user that very large specs may exceed decomposer capacity. Proceed anyway but note in the plan that the input was large.
+     Option 1 — install the converter and let kaizen handle it automatically:
+       PDF:  brew install poppler   (macOS) / sudo apt install poppler-utils (Linux)
+       DOCX: brew install pandoc    (macOS) / sudo apt install pandoc (Linux)
+
+     Option 2 — convert manually and re-run with the .txt/.md path:
+       PDF:  pdftotext <file> <file>.txt
+       DOCX: pandoc <file> -o <file>.md
+
+     Then: /kaizen:plan <converted-file>
+   ```
+
+4. Read the resolved spec content (either the original text file, or the converted output, or the inline prompt, or the gh issue body+comments). If a text file read succeeds but content appears mostly non-printable, treat as binary and apply the same auto-convert-or-stop logic.
+
+5. **Bound input size**: if the spec is >2000 lines (or >100 KB), warn the user. Proceed anyway but note "input was large" in the plan header.
 
 ### Phase 1: setup context
 
@@ -219,13 +253,26 @@ Tasks: <N>
 (Omit Suggestions section entirely if none.)
 ```
 
-5. Print to console:
+5. **If `--seed-todos` was passed**, use the **TodoWrite** tool to push each task into the session's todo list:
+   - Each plan task becomes one TodoWrite entry.
+   - `content` = task title (imperative, as in the plan).
+   - `activeForm` = present-continuous form of the title (e.g., "Replace mock auth with JWT issuance" → "Replacing mock auth with JWT issuance").
+   - `status` = `pending` for all (the user picks which to start).
+   - **Append, do not replace** any existing todos in the session.
+   - Cap at the 20 plan tasks (already capped in Phase 3).
+   - Note this in the console output (`+ N tasks pushed to TodoWrite`).
+
+   If `--seed-todos` was NOT passed, skip this step entirely.
+
+6. Print to console:
 
 ```
 ✓ kaizen plan: <N> tasks written
 
 Plan: <slug>
 File: .claude/kaizen/plans/<slug>-<timestamp>.md
+<if --seed-todos:>
+  + <N> tasks pushed to TodoWrite (visible in this session)
 
 Quick summary:
   - <N> total tasks (<feat>f, <fix>fx, <refactor>r, ...)
@@ -257,13 +304,19 @@ Next:
 | Failure | Behavior |
 |---|---|
 | Spec path doesn't exist | Stop with `✗ File not found: <path>` |
-| Binary file detected by extension | Stop with conversion suggestion (per Phase 0 table) |
-| Read returns garbled / mostly non-printable | Treat as binary, same conversion suggestion |
-| Spec is empty | Stop with `✗ Spec file is empty. Nothing to plan.` |
+| Binary file, auto-converter NOT installed | Stop with the conversion suggestion (install + convert + retry, OR install for auto-conversion next time) |
+| Binary file, auto-converter available but conversion FAILS | Stop with `✗ Conversion failed (<tool> exit <code>): <stderr excerpt>`. Don't proceed with garbage |
+| Read returns garbled / mostly non-printable (e.g., wrong extension) | Treat as binary, apply auto-convert-or-stop logic |
+| Spec is empty | Stop with `✗ Spec is empty. Nothing to plan.` |
+| `--from-prompt=""` (empty) | Same as empty spec — stop |
+| `--from-issue=<N>` but `gh` not installed | Stop with `✗ gh CLI not found. Install from https://cli.github.com/ then re-run.` |
+| `--from-issue=<N>` but `gh issue view` fails (not authenticated, no repo, issue doesn't exist) | Surface gh's error to the user. Don't pretend to succeed. |
+| Multiple input sources given | Stop with `✗ Specify exactly one of <path>, --from-prompt, --from-issue.` |
 | Agent fails or returns garbled output | Log the failure in the plan file; mark affected sections as `<unavailable>`; do not fail the whole skill |
 | Decomposer returns zero tasks | Write a plan file with `## (no actionable tasks extracted)` + Suggestions like "Spec may be too abstract — try adding concrete acceptance criteria" |
 | `mkdir -p .claude/kaizen/plans` fails | Stop with filesystem error message |
 | Spec >2000 lines or >100 KB | Warn but proceed; note "input was large" in the plan header |
+| `--seed-todos` but TodoWrite tool unavailable (rare — version mismatch) | Skip the push silently; note in console "TodoWrite unavailable in this Claude Code version — plan file written, but todos not seeded" |
 
 ---
 

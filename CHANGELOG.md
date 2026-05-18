@@ -10,11 +10,41 @@ While v0.x, **minor versions may include breaking changes**. From v1.0.0 onward,
 
 ## [Unreleased]
 
-### Planned (polish + UX improvements; no new top-level skills)
-- `/kaizen:learn` v0.9 — `--include-session` flag (analyze current Claude Code session conversation — needs careful design around accessing the transcript).
-- `/kaizen:analyze` v0.9 — additional modes: `--dependencies` (npm outdated/audit), `--security`, `--complexity`.
-- `/kaizen:preflight` v0.9 — risk-aware sizing (lighter security review for small diffs); commit style auto-detection from history.
-- `/kaizen:plan` v0.9 — inline prompt input (`--from-prompt`); gh issue input (`--from-issue`); auto-conversion of PDF/DOCX if `pdftotext`/`pandoc` installed; `--seed-todos` to push to TodoWrite.
+### Planned (polish backlog continues; no new top-level skills)
+- `/kaizen:learn` v0.10 — `--include-session` flag (analyze current Claude Code session conversation — needs careful design on transcript access).
+- `/kaizen:analyze` v0.10 — additional modes: `--dependencies` (npm outdated/audit), `--security`, `--complexity`.
+- `/kaizen:preflight` v0.10 — risk-aware sizing; commit style auto-detection from history.
+- `/kaizen:plan` v0.10 — `--scope=<area>` (limit decomposition to a directory); `--depth=<shallow|medium|deep>`.
+
+---
+
+## [0.9.0] — 2026-05-19
+
+### Added — `/kaizen:plan` input methods + TodoWrite integration
+
+Closes the `/plan` polish backlog by removing the "must be a markdown file already" friction.
+
+- **`--from-prompt="..."`** — inline prompt as the spec content. Useful for quick ad-hoc planning when writing a spec file is overkill. Skill slugifies the first ~40 chars for the plan filename.
+
+- **`--from-issue=<N>`** — fetch a GitHub issue via `gh issue view <N>`. Body + comments form the spec content. Requires `gh` CLI installed and authenticated. If `gh` is missing or the issue can't be fetched, kaizen surfaces gh's error directly rather than pretending to succeed.
+
+- **Auto-conversion of PDF/DOCX/ODT/RTF/EPUB/MOBI** — when `pdftotext` (from poppler) or `pandoc` is on PATH, kaizen converts transparently:
+  - PDFs use `pdftotext -layout` (preserves text layout for spec extraction)
+  - DOCX/ODT/RTF/EPUB/MOBI use `pandoc <input> -o <output>.md` (markdown output)
+  - Converted files **persist** at `.claude/kaizen/converted/<basename>.txt` (or `.md`) so the user can inspect what kaizen actually extracted. Subsequent re-runs reuse the conversion.
+  - `.claude/kaizen/` already gitignored — converted files don't pollute commits.
+  - When no converter is installed, the error message now mentions auto-conversion as an alternative to manual conversion.
+
+- **`--seed-todos`** — after writing the plan, also push each task into TodoWrite as a pending entry. Appends to (doesn't replace) any existing todos. Useful when you intend to start executing the plan in the current session. Use intentionally — TodoWrite is session-scoped, not project-scoped, so todos vanish when the session ends (the plan file persists).
+
+### Changed
+- Args table reorganized: exactly **one** input source must be specified (file path / `--from-prompt` / `--from-issue`). Multiple → error.
+- Plan header now records the original spec source + auto-conversion provenance (e.g., `Spec source: docs/spec.pdf (auto-converted via pdftotext → .claude/kaizen/converted/spec.pdf.txt)`).
+- Failure modes table expanded for new failure cases (gh missing, conversion fails, multiple inputs, empty `--from-prompt`, etc.).
+
+### Notes
+- Pure additive — without any new flags, v0.9 behaves exactly like v0.6/v0.8 for the existing file-path workflow.
+- v0.10 still on the docket for `/plan`: `--scope` and `--depth` for granularity control. `--execute` further out (needs autonomy boundaries design).
 
 ---
 

@@ -62,7 +62,7 @@ You'll see Claude run `detect.sh`, report what it found, and either generate fil
 
 ## Command reference
 
-Commands shipped in v0.8.0:
+Commands shipped in v0.9.0:
 - [`/kaizen:init`](#kaizeninit-arguments) — bootstrap project config
 - [`/kaizen:learn`](#kaizenlearn-arguments) — propose config updates from git activity
 - [`/kaizen:analyze`](#kaizenanalyze-arguments) — read-only audit of code vs. stated rules
@@ -511,32 +511,62 @@ Both are plugin agents (live in `plugins/kaizen/agents/`) — they're **not** th
 
 Auto-planner. Reads a written specification document and produces a **structured, dependency-ordered, annotated task tree**. Dispatches `plan-context` and `plan-decomposer` agents in parallel; synthesizes their outputs into the final plan.
 
-#### Subcommands
+#### Args and flags
 
-| Subcommand | Action |
+Exactly **one input source** is required. Flags can combine.
+
+| Arg | Action |
 |---|---|
-| `<path-to-spec>` | Generate a new plan from the spec file. |
-| `list` | List all plans saved in `.claude/kaizen/plans/`. |
-| `show <plan-id>` | Print a specific plan verbatim. `<plan-id>` is the filename without `.md`. `show latest` resolves to the most recent plan. |
+| `<path-to-spec>` | Generate a new plan from a spec file. Any text file works (`.md`, `.txt`, `.rst`, `.adoc`, README, SPEC, plain). |
+| `--from-prompt="..."` | Use the quoted string as the spec content directly — no file needed. Useful for quick ad-hoc planning. |
+| `--from-issue=<N>` | Fetch a GitHub issue via `gh issue view <N>`. Body + comments become the spec. Requires `gh` CLI installed and authenticated. |
+| `--seed-todos` | After writing the plan, also push each task into TodoWrite as a pending entry. Use when you intend to start executing right away. |
+| `list` | List all plans saved in `.claude/kaizen/plans/`. Exclusive. |
+| `show <plan-id>` | Print a specific plan verbatim. `<plan-id>` is the filename without `.md`. `show latest` resolves to the most recent. Exclusive. |
 
-#### Supported input formats
+Specifying multiple input sources (e.g., `<path>` and `--from-prompt` together) is an error.
 
-Any **text** file. The skill doesn't whitelist by extension — `.md`, `.txt`, `.rst`, `.adoc`, README, SPEC, plain text all work.
+#### Auto-conversion of binary formats (v0.9+)
 
-**Binary formats** (`.pdf`, `.docx`, `.doc`, `.odt`, `.rtf`, `.pages`, `.epub`, `.mobi`) are rejected with a conversion suggestion:
+When the appropriate converter is installed on PATH, kaizen handles binary specs transparently:
+
+| Format | Required tool | Install |
+|---|---|---|
+| PDF (`.pdf`) | `pdftotext` (from poppler) | macOS: `brew install poppler` · Linux: `sudo apt install poppler-utils` |
+| DOCX / ODT / RTF / EPUB / MOBI | `pandoc` | macOS: `brew install pandoc` · Linux: `sudo apt install pandoc` |
+| `.pages` | (no good converter) | Export from Pages to PDF first |
+
+Converted files **persist** at `.claude/kaizen/converted/<basename>.txt` so you can inspect what kaizen actually extracted. Subsequent re-runs reuse the conversion. The directory is gitignored.
+
+If the required converter is NOT installed, kaizen surfaces both options:
+- Install the tool (kaizen handles future conversions automatically), or
+- Convert manually and re-run with the `.txt`/`.md` path.
+
+#### Typical workflows
 
 ```
-✗ kaizen plan: detected PDF input — kaizen v0.6 cannot extract text from PDFs.
+# File-based spec:
+/kaizen:plan docs/specs/auth-rewrite.md
 
-  Convert it first and re-run:
-    macOS:    brew install poppler && pdftotext spec.pdf spec.txt
-    Linux:    sudo apt install poppler-utils && pdftotext spec.pdf spec.txt
-    DOCX:     pandoc spec.docx -o spec.md
+# Quick inline planning:
+/kaizen:plan --from-prompt="Add user search with autocomplete to the products page"
 
-  Then: /kaizen:plan <converted-file>
+# From a GitHub issue:
+/kaizen:plan --from-issue=42
+
+# PDF spec (auto-converts if pdftotext is installed):
+/kaizen:plan docs/specs/contract.pdf
+
+# Plan + immediately start executing in this session:
+/kaizen:plan docs/specs/sprint-5.md --seed-todos
+
+# Combine: GitHub issue + seed todos:
+/kaizen:plan --from-issue=42 --seed-todos
+
+# Browse / re-read:
+/kaizen:plan list
+/kaizen:plan show latest
 ```
-
-v0.7+ may add auto-conversion if `pdftotext` / `pandoc` are detected on PATH.
 
 #### What gets generated
 

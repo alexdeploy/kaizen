@@ -1399,6 +1399,10 @@ Run `/kaizen:plan show latest`:
 | Action | Idempotent? |
 |---|---|
 | `/kaizen:plan <spec>` | **No** — re-runs produce new files (versioned by timestamp). Content is similar but rarely identical (LLM variance). |
+| `/kaizen:plan --from-prompt="..."` | **No** for same reasons. v0.9+. |
+| `/kaizen:plan --from-issue=<N>` | **No** — and issue content may have evolved (new comments). v0.9+. |
+| `/kaizen:plan <pdf-or-docx>` | The auto-conversion step IS idempotent (re-uses persisted converted file); the plan generation is not. v0.9+. |
+| `/kaizen:plan ... --seed-todos` | **No** — TodoWrite entries accumulate across re-runs (no dedup). v0.9+. Re-running seeds duplicate todos. |
 | `/kaizen:plan list` | Yes — pure read. |
 | `/kaizen:plan show <id>` | Yes — pure read. |
 
