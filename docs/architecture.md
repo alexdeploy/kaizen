@@ -2,12 +2,17 @@
 
 > How the plugin works once it's installed and a user invokes a command. This document is about runtime behavior, not about how to develop kaizen itself.
 
-**This document covers three skills (v0.4.0):**
-- `/kaizen:init` — bootstrap a project's Claude Code config. Sections 1-8 below.
+**This document covers four skills + two plugin-level agents (v0.5.0):**
+- `/kaizen:init` — bootstrap a project's Claude Code config. Sections 1-8.
 - `/kaizen:learn` — propose updates to that config based on git activity. Section 9.
 - `/kaizen:analyze` — read-only audit of code against the config. Section 11.
+- `/kaizen:preflight` — pre-merge gate (deterministic checks + parallel LLM agents). Section 12.
 
-All three skills share the same plugin tree and runtime model. They differ in what they read, what they write, and the directives that govern each. `/init` and `/learn` can mutate config (the former generates, the latter applies user-approved proposals); `/analyze` is strictly read-only.
+Plus the agents shipped by the plugin and invoked by `/preflight`:
+- `preflight-security` — security audit scoped to changed files only.
+- `commit-suggester` — Conventional Commits message author from diff analysis.
+
+All four skills share the same plugin tree and runtime model. They differ in what they read, what they write, and the directives that govern each. `/init` and `/learn` can mutate config (`/init` generates, `/learn` applies user-approved proposals); `/analyze` and `/preflight` are strictly read-only (only the report file is written).
 
 ## Mental model
 
@@ -582,3 +587,227 @@ Five deliberate choices specific to `/analyze`:
 3. **Unchecked conventions are explicit.** Silently skipping unverifiable rules would hide kaizen's limitations. Listing them tells the user: "these need eyes."
 4. **Single output file, overwritten.** No archive of past reports. Reports are diagnostic snapshots; you take a new one when you want a new snapshot. Archiving adds complexity for little gain.
 5. **No state machine.** Unlike `/learn`, there's nothing to gate — every run is read-only and idempotent. The simplicity is deliberate.
+
+---
+
+# 12. `/kaizen:preflight` runtime (v0.5.0+)
+
+> Pre-merge gate combining deterministic checks (Bash) with LLM reasoning (parallel agents). The first kaizen skill to use the **multi-agent dispatch** pattern — a deliberate architectural step toward the plugin's longer roadmap of operational skills.
+
+## Mental model — orchestrator + specialized agents
+
+```
+┌─────────────────────────────┐
+│  PLUGIN TREE (read-only)    │
+│  ~/.claude/plugins/cache/   │
+│                             │
+│  • preflight/SKILL.md       │ (orchestrator)
+│  • agents/preflight-security│
+│  • agents/commit-suggester  │
+└──────────────┬──────────────┘
+               │
+               │ orchestrator skill spawns
+               │
+   ┌───────────┴──────────────────────┐
+   │                                  │
+   ▼  Phase 1                         ▼  Phase 2
+┌───────────────────┐         ┌───────────────────────────┐
+│  Deterministic    │         │  LLM agents (parallel)    │
+│  via Bash tool    │         │  via Task tool            │
+│  (sequential)     │         │  (single message, 2 calls)│
+│                   │         │                           │
+│  • tests          │         │  • preflight-security     │
+│  • typecheck      │         │  • commit-suggester       │
+│  • lint           │         │                           │
+└───────────────────┘         └───────────────────────────┘
+               │                                  │
+               └────────────┬─────────────────────┘
+                            │
+                            ▼  Phase 3
+                  ┌─────────────────────┐
+                  │  Aggregate          │
+                  │  + compute verdict  │
+                  │  + write report     │
+                  └─────────────────────┘
+```
+
+This is the first kaizen skill where the orchestrator/agent split is meaningful. `/init` and `/learn` and `/analyze` are single-agent skills; `/preflight` coordinates three execution surfaces (Bash tool, two Task invocations) into a unified verdict.
+
+## Components
+
+| Component | Type | Lifetime | Purpose |
+|---|---|---|---|
+| [`skills/preflight/SKILL.md`](../plugins/kaizen/skills/preflight/SKILL.md) | LLM prompt (orchestrator) | Loaded when `/kaizen:preflight` is invoked | Phase dispatch, verdict computation, report assembly |
+| [`agents/preflight-security.md`](../plugins/kaizen/agents/preflight-security.md) | Subagent definition | Spawned in Phase 2 | Security audit of changed files |
+| [`agents/commit-suggester.md`](../plugins/kaizen/agents/commit-suggester.md) | Subagent definition | Spawned in Phase 2 | Conventional Commits author |
+| `preflight-report.md` | Markdown file | Overwritten on every run | Persistent output |
+
+## Three-phase execution
+
+### Phase 1: deterministic checks (sequential, Bash)
+
+The orchestrator runs three commands sequentially via the Bash tool:
+
+1. Tests — `<pm> test` / `pytest` / `go test ./...` / `cargo test` (auto-detected from package.json or stack files)
+2. Typecheck — `npx tsc --noEmit` / `mypy .` / `go vet ./...` / `cargo check`
+3. Lint — `npx eslint .` / `ruff check .`
+
+For each: capture exit code, capture output (bounded to last 50 lines), classify as `pass` / `fail` / `skip`. No fail-fast — all three run regardless of individual results.
+
+**Why sequential and not parallel?** Three reasons: (a) bash background processes in a single skill invocation are tricky to manage; (b) the commands are fast enough that sequential overhead is negligible compared to LLM agent dispatch; (c) sequential output ordering is more predictable for the report. Parallel deterministic execution is a v0.7 optimization candidate.
+
+### Phase 2: LLM agents (parallel, Task)
+
+The orchestrator issues **two `Task` tool calls in a single message**, which Claude Code schedules in parallel:
+
+- `Task(subagent_type='preflight-security', prompt=...)` — receives the list of changed source files
+- `Task(subagent_type='commit-suggester', prompt=...)` — receives the diff range (`<base>..HEAD`)
+
+Each agent runs in its own fresh context (no main session bloat). Each returns a structured text result that the orchestrator captures.
+
+**Why parallel?** Token-cost-wise, parallel ≈ sequential (the agents do the same work either way). But wall-clock-wise, parallel is ~2× faster — the user gets the verdict in the time of the slower agent, not the sum.
+
+### Phase 3: verdict + report
+
+Verdict computation (deterministic logic in the orchestrator):
+
+```
+if tests==fail OR typecheck==fail OR security has critical
+    → BLOCK
+else if lint has errors OR security has high
+    → HOLD
+else
+    → SHIP
+```
+
+Skipped checks (no tooling installed) **never** trigger verdict changes. Report assembled, written to `.claude/kaizen/preflight-report.md`, console summary printed.
+
+## Agent contracts
+
+### `preflight-security`
+
+| Aspect | Value |
+|---|---|
+| Tools | `Read`, `Grep`, `Glob`, `Bash(git diff *)`, `Bash(git show *)`, `Bash(cat *)` |
+| Model | `claude-sonnet-4-6` |
+| Scope | ONLY the files listed in the prompt — does not crawl |
+| Output | Per-finding `[<severity>] <file>:<line>` blocks, OR exactly `"No security findings."` |
+| Severity tiers | `critical` (blocks), `high` (holds), `medium`, `low` |
+| Hard rules | Read-only (no Edit/Write tool); never pads with non-security advice; never speculates |
+
+### `commit-suggester`
+
+| Aspect | Value |
+|---|---|
+| Tools | `Read`, `Bash(git diff *)`, `Bash(git log *)`, `Bash(git status)`, `Bash(git show *)` |
+| Model | `claude-sonnet-4-6` |
+| Scope | The diff range passed in the prompt |
+| Output | Primary message + 2 alternatives + optional body, in fixed format |
+| Style | Conventional Commits ONLY in v0.5 (auto-detection from history in v0.6+) |
+| Hard rules | Imperative tense; ≤72 char subject; no emojis; never commits; never invents context |
+
+## Report schema
+
+Always at `.claude/kaizen/preflight-report.md`. Overwritten on every run.
+
+```markdown
+# kaizen :: preflight report
+
+Generated: <ISO 8601>
+Plugin version: <v>
+Base ref: <ref>
+Changed files: <count> source files (+ <N> non-source)
+
+---
+
+## Verdict: <SHIP | HOLD | BLOCK>
+
+<one-line reason>
+
+| Counts |
+|---|---|
+| critical / high / medium / low | ... |
+| lint errors / warnings | ... |
+| test failures, typecheck errors | ... |
+
+---
+
+## Phase 1 — Deterministic checks
+### Tests / Typecheck / Lint
+Status + command + output excerpt
+
+---
+
+## Phase 2 — LLM review
+### Security (preflight-security agent)
+<verbatim agent output>
+
+### Suggested commit message (commit-suggester agent)
+<verbatim agent output>
+
+---
+
+## Suggestions
+(stack/project-specific; omitted if none)
+```
+
+## Boundaries
+
+**`/preflight` reads**:
+- Git state: branch, base ref existence, diff, log
+- `package.json` / `pyproject.toml` / `go.mod` / `Cargo.toml` (for command detection)
+- Source files (via Bash for test commands; via Glob if needed; otherwise indirectly through the agents)
+
+**`/preflight` writes**:
+- `.claude/kaizen/preflight-report.md` (overwritten each run)
+- `.gitignore` (only if `.claude/kaizen/` not yet ignored — one-time append, same logic as `/learn`/`/analyze`)
+
+**`/preflight` never touches**:
+- Source code (no Edit tool).
+- `CLAUDE.md`, rules, settings, agents (the user's, not the plugin's).
+- `.git/` (no commits, no branches; reads only).
+- Anything outside `$CLAUDE_PROJECT_DIR`.
+- Other `.claude/kaizen/*.md` files (`pending.md` from /learn, `analyze-report.md` from /analyze).
+
+## Relationship to other skills
+
+```mermaid
+flowchart LR
+    Init[/kaizen:init/] --> Project[(Project<br/>config)]
+    Project --> Learn[/kaizen:learn/]
+    Learn --> Project
+    Project --> Analyze[/kaizen:analyze/]
+    Project --> Preflight[/kaizen:preflight/]
+    Analyze --> Report[(analyze-report.md)]
+    Preflight --> PReport[(preflight-report.md)]
+    Learn --> Pending[(pending.md)]
+
+    classDef writes fill:#fef3c7,stroke:#ca8a04;
+    classDef reads fill:#dbeafe,stroke:#2563eb;
+    class Init,Learn writes;
+    class Analyze,Preflight reads;
+```
+
+`/preflight` reads config (CLAUDE.md / rules) the same way `/analyze` does, but its purpose is **gating**, not auditing. The two are independent in v0.5 — `/preflight` doesn't call `/analyze` internally. v0.6 may add composition (e.g., `/preflight` invokes `/analyze --best-practices` scoped to diff).
+
+## Failure modes
+
+| Failure | Behavior |
+|---|---|
+| Not a git repo | Refuse. Suggest `git init` + at least one commit. |
+| No changes vs base | Stop with friendly message; no report written. |
+| `CLAUDE.md` missing | Don't refuse — preflight works without kaizen-bootstrapped config. Add a suggestion. |
+| All three deterministic check commands skip | Run agents anyway; warn in report. |
+| Agent fails or garbles output | Log in the report; verdict computed from successful parts; don't fail the whole preflight. |
+| Huge diff (>1000 files) | Run anyway with warning; agents work on source-filtered subset. |
+
+## Why this design
+
+Six deliberate choices specific to `/preflight`:
+
+1. **Multi-agent orchestration.** First kaizen skill where a single user invocation dispatches multiple subagents. Sets the pattern future skills (`/plan` likely v0.6+, others) will follow. Lower-friction to prove the pattern here with 2 agents than with 5 in `/plan`.
+2. **Hybrid execution.** Bash for what's deterministic (cheap, predictable, parseable exit codes); agents for what needs reasoning (security context, message tone). Single-paradigm solutions waste either tokens or developer time.
+3. **Parallel agent dispatch is real.** Two `Task` calls in one message ≈ 2× wall-clock speedup vs. sequential. Cost is the same. Always parallelize independent agent work.
+4. **Three-tier verdict.** SHIP/HOLD/BLOCK gives more signal than green/red. Distinguishes "fix before merging" from "don't merge at all" — actionable difference.
+5. **Plugin agents over project agents (for this skill).** `preflight-security` lives in the plugin so every kaizen user gets consistent security review. The user's `code-reviewer.md` (from `/init`) stays for manual general-purpose review — two agents, two jobs.
+6. **Read-only contract.** Same as `/analyze`. Auto-fix is tempting but dangerous; deferring to v0.6 lets us see what users actually want fixed automatically vs. left for manual decision.

@@ -2,10 +2,11 @@
 
 > Decision trees, action sequences, and worked scenarios. Mermaid diagrams render in GitHub, VS Code (Markdown Preview Mermaid Support), and most modern markdown viewers.
 
-**Covers three skills:**
+**Covers four skills:**
 - **`/kaizen:init`** — sections 1–9 below.
 - **`/kaizen:learn`** — section 10.
-- **`/kaizen:analyze`** — section 11 onward.
+- **`/kaizen:analyze`** — section 11.
+- **`/kaizen:preflight`** — section 12 onward.
 
 For static structure see [architecture.md](./architecture.md). For end-user instructions see [user-manual.md](./user-manual.md).
 
@@ -856,3 +857,297 @@ Re-running is always safe. No state machine to worry about. The report file is t
 | Can mutate config? | Yes (always) | Yes (via `apply` subcommand only) | **Never** |
 | Output drift report? | Yes (per-file) | Yes (per-proposal evidence) | The report IS the output |
 | Future signal sources | More stack presets (v0.4+) | Session conversation (v0.5), auto-memory (v0.6) | `--dependencies`, `--security`, `--complexity` (v0.5+) |
+
+---
+
+# 12. `/kaizen:preflight` runtime
+
+## 12.1 Top-level sequence (full run)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User
+    participant Claude as Claude Code
+    participant Skill as preflight/SKILL.md
+    participant Git as git (Bash)
+    participant Test as test runner (Bash)
+    participant Sec as preflight-security<br/>(Task subagent)
+    participant Commit as commit-suggester<br/>(Task subagent)
+    participant Report as preflight-report.md
+
+    User->>Claude: /kaizen:preflight
+    Claude->>Skill: load SKILL.md
+    Claude->>Git: detect branch + base ref
+    Claude->>Git: git diff --name-only base..HEAD
+    alt no changes
+        Claude->>User: "Nothing to preflight." STOP
+    end
+    Claude->>Claude: detect stack (read package.json/etc.)
+    Claude->>Claude: resolve check commands per phase
+
+    Note over Claude: Phase 1 (sequential)
+    Claude->>Test: run tests
+    Test-->>Claude: exit code + output
+    Claude->>Test: run typecheck
+    Test-->>Claude: exit code + output
+    Claude->>Test: run lint
+    Test-->>Claude: exit code + output
+
+    Note over Claude,Commit: Phase 2 (parallel — single message, 2 Task calls)
+    par Security review
+        Claude->>Sec: Task(preflight-security, changed files)
+        Sec-->>Claude: findings or "No security findings."
+    and Commit suggestion
+        Claude->>Commit: Task(commit-suggester, diff range)
+        Commit-->>Claude: primary + alternatives + body
+    end
+
+    Note over Claude: Phase 3
+    Claude->>Claude: compute verdict (SHIP/HOLD/BLOCK)
+    Claude->>Report: write preflight-report.md
+    Claude->>User: console banner + verdict + path to report
+```
+
+The **`par` block** is the key new pattern: two Task calls dispatched in a single message run in parallel.
+
+## 12.2 Phase decomposition
+
+```mermaid
+flowchart TD
+    Start([/kaizen:preflight]) --> Show{arg == 'show'?}
+    Show -->|yes| ShowFile[Read preflight-report.md<br/>print verbatim]
+    Show -->|no| Detect[detect base ref<br/>+ changed files<br/>+ stack]
+
+    Detect --> Empty{no changes?}
+    Empty -->|yes| Stop[✓ Nothing to preflight. STOP]
+    Empty -->|no| Phase1
+
+    Phase1[Phase 1: Deterministic<br/>tests → typecheck → lint<br/>sequential, all run regardless of failures]
+    Phase1 --> Phase2
+
+    Phase2[Phase 2: LLM agents<br/>preflight-security + commit-suggester<br/>parallel via Task tool in single message]
+    Phase2 --> Aggregate
+
+    Aggregate[Phase 3: Aggregate]
+    Aggregate --> VerdictCalc{Compute<br/>verdict}
+
+    VerdictCalc -->|tests fail OR typecheck fail<br/>OR critical security| Block[BLOCK]
+    VerdictCalc -->|lint errors OR high security| Hold[HOLD]
+    VerdictCalc -->|else| Ship[SHIP]
+
+    Block --> Write[Write preflight-report.md]
+    Hold --> Write
+    Ship --> Write
+    Write --> Print[Print console summary + verdict]
+
+    classDef stop fill:#fecaca,stroke:#dc2626;
+    classDef warn fill:#fef3c7,stroke:#ca8a04;
+    classDef ok fill:#dcfce7,stroke:#16a34a;
+    class Block stop;
+    class Hold warn;
+    class Ship ok;
+```
+
+## 12.3 Verdict decision logic
+
+The verdict is computed by a deterministic decision tree, NOT by an LLM. The agents return findings; the orchestrator classifies them.
+
+```mermaid
+flowchart TD
+    Start[All check results collected] --> Critical{Any critical<br/>security finding?}
+    Critical -->|yes| Block1[BLOCK]
+    Critical -->|no| TestsFail{Tests failed?}
+    TestsFail -->|yes| Block2[BLOCK]
+    TestsFail -->|no| TypeFail{Typecheck failed?}
+    TypeFail -->|yes| Block3[BLOCK]
+    TypeFail -->|no| LintErr{Lint errors<br/>not warnings?}
+
+    LintErr -->|yes| Hold1[HOLD]
+    LintErr -->|no| HighSec{Any high<br/>security finding?}
+    HighSec -->|yes| Hold2[HOLD]
+    HighSec -->|no| Ship[SHIP]
+
+    classDef stop fill:#fecaca,stroke:#dc2626;
+    classDef warn fill:#fef3c7,stroke:#ca8a04;
+    classDef ok fill:#dcfce7,stroke:#16a34a;
+    class Block1,Block2,Block3 stop;
+    class Hold1,Hold2 warn;
+    class Ship ok;
+```
+
+**Skipped checks** (no tooling installed) are reported but **never** affect the verdict.
+
+## 12.4 Base ref detection (subtree)
+
+```mermaid
+flowchart TD
+    Start[git symbolic-ref --short HEAD] --> Branch{current branch}
+    Branch -->|main| UseHead1a[base = HEAD~1]
+    Branch -->|master| UseHead1b[base = HEAD~1]
+    Branch -->|other| TryMain{main exists?}
+
+    TryMain -->|yes| UseMain[base = main]
+    TryMain -->|no| TryMaster{master exists?}
+    TryMaster -->|yes| UseMaster[base = master]
+    TryMaster -->|no| Fallback[base = HEAD~1 fallback]
+
+    UseHead1a --> Verify
+    UseHead1b --> Verify
+    UseMain --> Verify
+    UseMaster --> Verify
+    Fallback --> Verify
+
+    Verify{base ref<br/>verifies via<br/>git rev-parse?}
+    Verify -->|yes| Done([use base])
+    Verify -->|no| FallbackFinal[base = HEAD~1<br/>warn in report]
+    FallbackFinal --> Done
+```
+
+The chosen base ref is recorded in the report header so the user knows what was compared against.
+
+## 12.5 The parallel-Task pattern (architectural primer)
+
+This skill introduces the multi-agent dispatch pattern to kaizen. The mechanism is simple but important.
+
+**Sequential** (what we DON'T do):
+
+```
+Claude → Task(A) → wait → Task(B) → wait → continue
+```
+
+Total time: T(A) + T(B).
+
+**Parallel** (what `/preflight` Phase 2 does):
+
+```
+Claude → [Task(A), Task(B)] (single message) → wait for both → continue
+```
+
+Total time: max(T(A), T(B)) — usually ~2× faster.
+
+The unlock: Claude Code schedules tool calls within a single message in parallel when they're independent. Two Task calls in the same response = two subagents in fresh contexts running simultaneously.
+
+**Why kaizen waited until `/preflight` to use this**: `/init`, `/learn`, `/analyze` are all one-job-per-invocation skills. Their "parallelism" would be artificial. `/preflight` genuinely has two independent reasoning tasks (security review, commit message) that benefit from concurrent execution.
+
+This pattern will scale to `/plan` (v0.6+ planned), which will likely dispatch multiple research subagents for different parts of a spec doc.
+
+## 12.6 Worked scenarios
+
+### Scenario P1 — clean change, SHIP verdict
+
+State: feature branch `feat/zod-validation`, 4 files changed since `main`. All checks pass; security agent finds nothing; commit-suggester proposes a good message.
+
+Run `/kaizen:preflight`:
+
+1. Base ref detected: `main`.
+2. 4 changed files (3 source, 1 doc).
+3. Phase 1: tests pass (47/47), typecheck pass (0 errors), lint pass (0 errors, 2 warnings).
+4. Phase 2 (parallel): security returns "No security findings."; commit-suggester returns `feat(api): add zod validation`.
+5. Verdict: SHIP.
+6. Report written. Console:
+   ```
+   ╔════════════════════════╗
+   ║  PREFLIGHT — SHIP ✓    ║
+   ║  0c · 0h · 0m · 0l     ║
+   ╚════════════════════════╝
+
+   ✓ Tests       (47 passed, 0 failed)
+   ✓ Typecheck   (0 errors)
+   ⚠ Lint        (0e, 2w)
+   ✓ Security    (No findings)
+   ℹ Commit msg  (feat(api): add zod validation)
+
+   Verdict: SHIP. Ready to commit.
+   ```
+
+### Scenario P2 — critical security finding, BLOCK verdict
+
+Same project state, but one of the changed files added a hardcoded API token.
+
+1-3. Same as P1: all deterministic checks pass.
+4. Phase 2: security agent finds `[critical] src/api/auth.ts:42 — hardcoded API token`. Commit-suggester still returns a message.
+5. Verdict: BLOCK (critical security → automatic BLOCK regardless of other checks).
+6. Console:
+   ```
+   ╔════════════════════════╗
+   ║  PREFLIGHT — BLOCK ✗   ║
+   ║  1c · 0h · 0m · 0l     ║
+   ╚════════════════════════╝
+
+   ✓ Tests       (47 passed, 0 failed)
+   ✓ Typecheck   (0 errors)
+   ⚠ Lint        (0e, 2w)
+   ✗ Security    (1 critical finding)
+   ℹ Commit msg  (feat(api): add zod validation)
+
+   Verdict: BLOCK. 1 critical security finding must be resolved.
+   ```
+
+### Scenario P3 — agent failure, partial result
+
+Same setup, but the `commit-suggester` agent fails (e.g., diff too large, internal error).
+
+1-3. Same. Deterministic checks complete.
+4. Phase 2: security returns findings normally; commit-suggester returns an error/garbled output.
+5. Orchestrator logs the commit-suggester failure in the report; verdict computed from the successful parts (tests, typecheck, lint, security).
+6. Console includes the deterministic + security results normally; commit msg line says `(unavailable — see report)`.
+
+This way one agent failing doesn't kill the whole preflight.
+
+### Scenario P4 — `show` after a previous run
+
+User ran `/kaizen:preflight` 30 min ago, wants to re-read the report.
+
+Run `/kaizen:preflight show`:
+
+1. Read `.claude/kaizen/preflight-report.md`. If present, print verbatim. No phases run. No agents spawned. Instant.
+
+### Scenario P5 — no changes since base
+
+User on `feat/xyz` branch, but hasn't committed anything new since branching from `main`.
+
+1. Base ref: `main`.
+2. `git diff --name-only main..HEAD` returns empty.
+3. Print `✓ No changes since main. Nothing to preflight.`
+4. **No report written.** No agents spawned. Exit.
+
+## 12.7 Idempotency
+
+| Action | Idempotent? |
+|---|---|
+| `/kaizen:preflight` | Yes for the same git state. Re-running on unchanged repo gives same verdict and similar agent outputs. |
+| `/kaizen:preflight show` | Yes — pure read. |
+
+Re-runs are encouraged — after fixing issues, run again to confirm SHIP. Cheap and stateless.
+
+## 12.8 Token cost characterization
+
+Approximate cost breakdown (assumes Sonnet for both agents):
+
+| Phase | Tokens | Notes |
+|---|---|---|
+| Orchestrator setup | ~1k | SKILL.md load + reasoning over args |
+| Phase 1 commands | ~0 | Bash output goes to context but isn't billed as model input |
+| Phase 1 result parsing | ~1-5k | Depending on output size (bounded to 50 lines/check) |
+| Phase 2 — security agent | ~5-20k | Depends on changed-file size; bounded by file count |
+| Phase 2 — commit-suggester | ~3-10k | Depends on diff size |
+| Phase 3 aggregation + report | ~2k | Writing the report markdown |
+
+**Total per preflight**: roughly 12k-40k tokens. The dominant cost is Phase 2 agents; the changed-files-only scoping is what keeps this bounded.
+
+For a 20-file diff in a TypeScript repo, expect ~15-25k tokens total. The deterministic phase has no model cost beyond parsing.
+
+## 12.9 Comparison with other kaizen skills
+
+| Aspect | `/init` | `/learn` | `/analyze` | `/preflight` |
+|---|---|---|---|---|
+| Trigger | Once per project | After tasks finish | When curious | Before commit/PR |
+| Reads | Project files, package.json | git log/diff, CLAUDE.md | All source + config | Git state, package.json, changed files |
+| Writes | Many config files | `pending.md`, optionally config | `analyze-report.md` only | `preflight-report.md` only |
+| State machine | No | Yes (pending) | No | No |
+| Can mutate config | Yes | Yes (via apply) | Never | Never |
+| Subagents spawned | Optional (archeology) | None | None | **2, in parallel** |
+| Token cost | High (multi-file generation) | Medium (per analysis) | Low–medium | Medium (bounded by diff size) |
+| Run frequency | 1× project lifetime | Weekly / per sprint | Ad hoc | Every PR/commit candidate |
+| Verdict output | Drift report | Proposals | Findings | **SHIP/HOLD/BLOCK** |

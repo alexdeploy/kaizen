@@ -62,10 +62,11 @@ You'll see Claude run `detect.sh`, report what it found, and either generate fil
 
 ## Command reference
 
-Commands shipped in v0.4.0:
+Commands shipped in v0.5.0:
 - [`/kaizen:init`](#kaizeninit-arguments) — bootstrap project config
 - [`/kaizen:learn`](#kaizenlearn-arguments) — propose config updates from git activity
 - [`/kaizen:analyze`](#kaizenanalyze-arguments) — read-only audit of code vs. stated rules
+- [`/kaizen:preflight`](#kaizenpreflight-arguments) — pre-merge gate (tests + LLM review + verdict)
 
 ### `/kaizen:init [arguments]` {#kaizeninit-arguments}
 
@@ -366,6 +367,107 @@ Modes run: --best-practices, --coverage, --architecture
 - **No auto-fix**. Findings are surfaced; action is the user's call.
 - **Bounded output**. If a check returns >50 matches, only the first 20 are listed with a `+N more` summary.
 - **No external tool dependencies**. v0.4 doesn't shell out to `npm`/`pip`/etc. — that's deferred to v0.5+ (`--dependencies`).
+
+### `/kaizen:preflight [show]` {#kaizenpreflight-arguments}
+
+Pre-merge sanity check. Runs deterministic checks (tests, typecheck, lint) sequentially, then dispatches two specialized agents (security review + commit message suggestion) **in parallel**, then aggregates everything into a single **SHIP / HOLD / BLOCK** verdict. Use it before committing or opening a PR.
+
+#### Subcommands
+
+| Subcommand | Action |
+|---|---|
+| *(none)* | Run full preflight — all 5 checks |
+| `show` | Re-print the last report from `.claude/kaizen/preflight-report.md` without re-running |
+
+(v0.6 will add `--base=<ref>`, `--skip=<checks>`, `--auto-fix`.)
+
+#### What gets checked
+
+| Phase | Check | How |
+|---|---|---|
+| 1 (deterministic, sequential) | Tests | Auto-detects `<pm> test` (or `pytest` / `go test` / `cargo test`). Skipped if no command resolvable. |
+| 1 | Typecheck | `npx tsc --noEmit` (TS) / `mypy .` (Python) / `go vet ./...` (Go) / `cargo check` (Rust). Skipped if tooling absent. |
+| 1 | Lint | `npx eslint .` (JS/TS) / `ruff check .` (Python). Skipped otherwise. |
+| 2 (LLM, parallel) | Security review | `preflight-security` agent reads ONLY changed files vs base ref. Reports findings by severity (critical/high/medium/low). |
+| 2 (LLM, parallel) | Commit message | `commit-suggester` agent analyzes the diff, returns a Conventional Commits message + 2 alternatives. |
+
+The two LLM agents run **simultaneously** in fresh subagent contexts — neither blocks the other.
+
+#### Verdict tiers
+
+| Verdict | When |
+|---|---|
+| **BLOCK** | Tests failed OR typecheck failed OR security has `critical` findings |
+| **HOLD** | Lint has errors (not just warnings) OR security has `high` findings |
+| **SHIP** | Everything else (passes, skips, only warnings, only low/medium findings) |
+
+Skipped checks (no tooling installed) **never** trigger a verdict — they're reported but don't block.
+
+#### Base ref auto-detection
+
+`/kaizen:preflight` compares your current state against a base ref:
+
+| Current branch | Base ref used |
+|---|---|
+| `main` | `HEAD~1` (last commit) |
+| `master` | `HEAD~1` |
+| any other branch | `main` (if exists), else `master`, else `HEAD~1` |
+
+Override via `--base=<ref>` planned for v0.6.
+
+#### Typical workflow
+
+```
+# Before committing, gate the change:
+/kaizen:preflight
+
+# Read the verdict + summary in console. Full report:
+/kaizen:preflight show
+
+# Make fixes for any HOLD/BLOCK issues, then re-run:
+/kaizen:preflight
+
+# Once SHIP, commit (use the suggested message or your own):
+git add . && git commit -m "feat(api): add zod validation to user endpoints"
+```
+
+#### Example output (console)
+
+```
+╔══════════════════════════════════════════════╗
+║  PREFLIGHT — HOLD ⚠                          ║
+║  0c · 1h · 3m · 0l                           ║
+╚══════════════════════════════════════════════╝
+
+✓ Tests       (47 passed, 0 failed)
+✓ Typecheck   (0 errors)
+⚠ Lint        (2e, 5w)
+⚠ Security    (0c / 1h / 3m / 0l)
+ℹ Commit msg  (feat(api): add zod validation to user endpoints)
+
+Verdict: HOLD. Lint errors must be fixed and 1 high security finding to address.
+
+Full report: .claude/kaizen/preflight-report.md
+  /kaizen:preflight show   # re-print the report
+  /kaizen:preflight        # re-run after fixes
+```
+
+#### Architecture (the agents involved)
+
+`/kaizen:preflight` doesn't do the LLM work itself — it **delegates** to two plugin-level agents:
+
+- **`preflight-security`**: read-only auditor that checks the diff for hardcoded secrets, injection, auth gaps, unsafe deserialization, path traversal, weak crypto, CORS/CSRF issues, and secret leaks in logs/errors. Returns findings tagged with severity, or `"No security findings."` when clean.
+- **`commit-suggester`**: analyzes the diff via `git diff` / `git diff --stat`, picks the dominant Conventional Commits type (`feat`/`fix`/`refactor`/etc.), produces a primary message + 2 alternatives + optional body. Imperative tense, ≤72 chars subject.
+
+Both are plugin agents (live in `plugins/kaizen/agents/`) — they're **not** the `code-reviewer.md` that `/kaizen:init` generates in your project. That one stays user-customizable for manual general-purpose review. No overlap.
+
+#### Limits and safety
+
+- **Strictly read-only** except for the report file. Never modifies source code, never commits.
+- **Bounded output**: deterministic check commands have output capped at 50 lines (tail kept).
+- **No auto-fix in v0.5**: `--auto-fix` for lint/format is deferred to v0.6.
+- **Spawns at most 2 subagents per run**, both in parallel. No recursive spawning.
+- **Changed-files-only scope** for security agent — token cost grows with change size, not project size.
 
 ## Troubleshooting
 

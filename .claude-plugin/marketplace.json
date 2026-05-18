@@ -10,7 +10,7 @@
       "name": "kaizen",
       "source": "./plugins/kaizen",
       "description": "Bootstrap and continuous improvement for Claude Code projects: scaffolds .claude/, adapts to existing repos, evolves config as the project grows",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "keywords": ["bootstrap", "scaffold", "auto-learning", "best-practices"]
     }
   ]

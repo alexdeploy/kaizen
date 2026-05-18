@@ -12,9 +12,34 @@ While v0.x, **minor versions may include breaking changes**. From v1.0.0 onward,
 
 ### Planned
 - `/kaizen:plan` — turn spec doc into structured task tree (auto-planificador).
-- `/kaizen:preflight` — pre-PR chain (test → typecheck → lint → security → commit suggestion).
-- `/kaizen:analyze` v0.5 — additional modes: `--dependencies` (npm outdated, audit), `--security`, `--complexity`.
-- `/kaizen:learn` v0.5 — `--include-session` flag (analyze current Claude Code session for user corrections).
+- `/kaizen:preflight` v0.6 — `--base=<ref>`, `--skip=<checks>`, `--auto-fix` flags; risk-aware sizing; commit style auto-detection.
+- `/kaizen:analyze` v0.6 — additional modes: `--dependencies` (npm outdated, audit), `--security`, `--complexity`.
+- `/kaizen:learn` v0.6 — `--include-session` flag (analyze current Claude Code session for user corrections).
+
+---
+
+## [0.5.0] — 2026-05-18
+
+### Added
+- **New skill `/kaizen:preflight`**: pre-merge gate combining deterministic checks (tests, typecheck, lint) with LLM-driven reasoning (security review, commit suggestion). Produces a single **SHIP / HOLD / BLOCK** verdict.
+  - **Phase 1 (sequential, Bash tool)**: runs `<pm> test` / `tsc --noEmit` / `eslint .` (or Python/Go/Rust equivalents auto-detected). Captures exit codes and bounded output.
+  - **Phase 2 (parallel, Task tool)**: dispatches `preflight-security` and `commit-suggester` agents simultaneously in a single message — ~2× faster than sequential.
+  - **Phase 3**: aggregates everything into `.claude/kaizen/preflight-report.md` (overwritten each run) + prints console banner with verdict.
+  - **Base ref auto-detection**: `HEAD~1` on main/master, else `main` (or `master`), with fallback. Changed-files list scoped to source extensions for the security agent.
+  - **Verdict tiers**: BLOCK = tests fail / typecheck fail / critical security; HOLD = lint errors / high security; SHIP = everything else.
+  - `show` subcommand re-prints last report without re-running.
+
+### Added — new plugin-level agents
+- **`preflight-security`**: read-only security auditor scoped to the changed files only. Categories: hardcoded secrets, injection, auth gaps, unsafe deserialization, path traversal, weak crypto, CORS/CSRF, secret leakage in logs. Severity tiered. Returns "No security findings." sentinel when clean.
+- **`commit-suggester`**: produces Conventional Commits messages from a diff. Returns primary + 2 alternatives + optional body. Handles mixed-type diffs by priority order. Style auto-detection deferred to v0.6.
+
+### Design notes
+- **Hybrid execution model**: deterministic checks via Bash are cheap and predictable; LLM agents are reserved for reasoning. No agents for `npm test` — that's just a process invocation.
+- **Parallel agent dispatch**: both agents spawned in a single message via two `Task` tool calls. Fresh contexts each, no bloat in the main session.
+- **Independent of `/init`'s `code-reviewer`**: `preflight-security` is plugin-level and narrowly scoped to diffs; user's `code-reviewer.md` (if `/init` was run) stays for manual general-purpose review. Two agents, two jobs, no overlap.
+- **Conventional Commits as default**: integrates with semver bots and changelog generators. Other styles (gitmoji, plain, custom) supported in v0.6 via auto-detection from `git log`.
+- **Read-only by hard rule**: writes only `.claude/kaizen/preflight-report.md` and (one-time) `.gitignore`. Never touches source, never commits.
+- v0.5 scope explicitly excludes: `--base` / `--skip` / `--auto-fix` flags, format check, coverage check, risk-aware sizing. All in v0.6 backlog.
 
 ---
 
