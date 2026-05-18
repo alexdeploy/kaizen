@@ -2,17 +2,18 @@
 
 > How the plugin works once it's installed and a user invokes a command. This document is about runtime behavior, not about how to develop kaizen itself.
 
-**This document covers four skills + two plugin-level agents (v0.5.0):**
+**This document covers five skills + four plugin-level agents (v0.6.0 — the v0 skill set is complete):**
 - `/kaizen:init` — bootstrap a project's Claude Code config. Sections 1-8.
 - `/kaizen:learn` — propose updates to that config based on git activity. Section 9.
 - `/kaizen:analyze` — read-only audit of code against the config. Section 11.
 - `/kaizen:preflight` — pre-merge gate (deterministic checks + parallel LLM agents). Section 12.
+- `/kaizen:plan` — auto-planner (spec doc → annotated task tree). Section 13.
 
-Plus the agents shipped by the plugin and invoked by `/preflight`:
-- `preflight-security` — security audit scoped to changed files only.
-- `commit-suggester` — Conventional Commits message author from diff analysis.
+Plus the agents shipped by the plugin:
+- `preflight-security`, `commit-suggester` — invoked by `/preflight`.
+- `plan-context`, `plan-decomposer` — invoked by `/plan`.
 
-All four skills share the same plugin tree and runtime model. They differ in what they read, what they write, and the directives that govern each. `/init` and `/learn` can mutate config (`/init` generates, `/learn` applies user-approved proposals); `/analyze` and `/preflight` are strictly read-only (only the report file is written).
+All five skills share the same plugin tree and runtime model. They differ in what they read, what they write, and the directives that govern each. `/init` and `/learn` can mutate config (`/init` generates, `/learn` applies user-approved proposals); `/analyze`, `/preflight`, and `/plan` are strictly read-only (only the artifact file is written).
 
 ## Mental model
 
@@ -811,3 +812,253 @@ Six deliberate choices specific to `/preflight`:
 4. **Three-tier verdict.** SHIP/HOLD/BLOCK gives more signal than green/red. Distinguishes "fix before merging" from "don't merge at all" — actionable difference.
 5. **Plugin agents over project agents (for this skill).** `preflight-security` lives in the plugin so every kaizen user gets consistent security review. The user's `code-reviewer.md` (from `/init`) stays for manual general-purpose review — two agents, two jobs.
 6. **Read-only contract.** Same as `/analyze`. Auto-fix is tempting but dangerous; deferring to v0.6 lets us see what users actually want fixed automatically vs. left for manual decision.
+
+---
+
+# 13. `/kaizen:plan` runtime (v0.6.0+)
+
+> Auto-planner. Reads a written specification document and produces an annotated task tree. Uses the parallel-agent dispatch pattern from `/preflight`, but with a different shape: research-then-synthesize, not deterministic-then-LLM.
+
+## Mental model — research agents + skill-level synthesis
+
+```
+┌─────────────────────────────┐       ┌─────────────────────────────┐
+│  PLUGIN TREE (read-only)    │       │  USER PROJECT (mostly read) │
+│  ~/.claude/plugins/cache/   │ reads │  $CLAUDE_PROJECT_DIR        │
+│                             │ ────▶ │                             │
+│  • plan/SKILL.md            │       │  • <spec.md> ← required arg │
+│  • agents/plan-context.md   │       │  • CLAUDE.md (read)         │
+│  • agents/plan-decomposer.md│       │  • .claude/rules/* (read)   │
+│                             │       │  • src/*/ (Glob only)       │
+│                             │       │  • package.json (read)      │
+└─────────────────────────────┘       └─────────────────────────────┘
+                                                  │
+                                                  │ writes only the plan file
+                                                  ▼
+                                       ┌─────────────────────────────┐
+                                       │  PLANS (accumulating)       │
+                                       │  .claude/kaizen/plans/      │
+                                       │    <slug>-<YYYYMMDD-HHMM>.md│
+                                       │  (auto-gitignored)          │
+                                       └─────────────────────────────┘
+```
+
+Unlike the other read-only skills (`/analyze`, `/preflight`) which overwrite a single report file, `/plan` writes **versioned, accumulating** plan files. Each invocation produces a new file; old plans persist. This lets users compare plan evolutions across spec revisions or re-plans.
+
+## Components
+
+| Component | Type | Lifetime | Purpose |
+|---|---|---|---|
+| [`skills/plan/SKILL.md`](../plugins/kaizen/skills/plan/SKILL.md) | LLM prompt (orchestrator) | Loaded when `/kaizen:plan` is invoked | 4-phase dispatch + synthesis + write |
+| [`agents/plan-context.md`](../plugins/kaizen/agents/plan-context.md) | Subagent definition | Spawned in Phase 2 | Project state profile (stack, architecture, conventions, key areas) |
+| [`agents/plan-decomposer.md`](../plugins/kaizen/agents/plan-decomposer.md) | Subagent definition | Spawned in Phase 2 | Spec → raw task list with type/complexity/criteria |
+| `<slug>-<timestamp>.md` files | Markdown files | Persistent (accumulate) | Each invocation writes a new file under `plans/` |
+
+## Four-phase execution
+
+### Phase 0: validate input
+
+The skill checks file existence + extension blocklist before any LLM work:
+
+| Extension | Action |
+|---|---|
+| `.pdf`, `.docx`, `.doc`, `.odt`, `.rtf`, `.pages`, `.epub`, `.mobi` | **STOP** with conversion suggestion |
+| any other | Try to Read. If content appears binary (high ratio of non-printable bytes), same conversion suggestion. |
+
+Bound input size: warn if >2000 lines or >100 KB; proceed anyway with a note in the header.
+
+### Phase 1: setup signals
+
+Light project signals via Bash + Read (presence checks for `package.json`, `pyproject.toml`, `CLAUDE.md`, etc.). Used to brief the `plan-context` agent. These are signals, not deep reads — the agent does the deep work.
+
+### Phase 2: parallel agents (the multi-agent dispatch)
+
+Single message, two `Task` tool calls:
+
+- `plan-context` — receives project root and (just for awareness) the spec path. Reads project state. Returns a structured profile.
+- `plan-decomposer` — receives the spec file path. Reads ONLY the spec. Returns a raw task list.
+
+The two agents are **independent**: each has a fresh context, no shared state, no dependency on the other's output. Parallelization is real (≈2× wall-clock speedup).
+
+### Phase 3: synthesis (in the skill, no third agent)
+
+The orchestrator takes both outputs and produces the final plan:
+
+1. Start with the decomposer's raw task list (in spec order).
+2. For each task, cross-reference against the context profile:
+   - **Impact areas** — match task title + criteria against context's "key areas" using heuristics.
+   - **Dependencies** — detect when one task's criteria require another task's output ("Task 3 requires the schema from Task 1").
+   - **Risks** — flag if context marked the area as critical (auth, payments, migrations).
+3. Reorder tasks by dependencies: foundational (no deps) first, downstream after.
+4. Cap at 20 tasks; group if more.
+
+This is the same architectural choice as `/preflight`'s Phase 3: the synthesis happens in the orchestrator's reasoning rather than a third agent, because the merge is genuinely the orchestrator's job (it has both agent outputs in context).
+
+### Phase 4: write the plan
+
+- Compute filename: `<slug from spec basename>-<YYYYMMDD-HHMM>.md`.
+- Ensure `.claude/kaizen/plans/` exists (`mkdir -p`).
+- Ensure `.claude/kaizen/` is in `.gitignore` (same one-time logic as `/learn` and `/analyze`).
+- Write the plan file using the structured schema.
+- Print console summary with task counts, file path, and next-step commands.
+
+## Plan file schema
+
+Always at `.claude/kaizen/plans/<slug>-<YYYYMMDD-HHMM>.md`. **Never overwritten** — re-runs produce new files.
+
+```markdown
+# Plan: <spec-name>
+
+Generated: <ISO 8601>
+Plugin version: <v>
+Spec source: <path>
+Tasks: <N>
+
+## Project context (auto-detected)
+<2-4 line summary from plan-context>
+**Key areas potentially affected**: <comma-separated dirs>
+
+---
+
+## Task N: <one-line imperative>
+
+**Type**: feat|fix|refactor|docs|test|chore|infra|spike
+**Complexity**: trivial|small|medium|large|epic
+**Impact areas**: `<path>`, ...
+**Depends on**: Task M, Task K (or "none")
+**Risks**: <one-line, or "none">
+
+### Description
+<2-4 sentences>
+
+### Acceptance criteria
+- [ ] ...
+- [ ] ...
+
+### Suggested approach
+<optional, 2-3 lines>
+
+---
+
+## Summary
+<counts by type, by complexity, foundational tasks>
+
+## Suggestions
+<actionable, evidence-based; omitted if none>
+```
+
+## Agent contracts
+
+### `plan-context`
+
+| Aspect | Value |
+|---|---|
+| Tools | `Read`, `Grep`, `Glob`, `Bash(test/ls/cat/wc *)` |
+| Model | `claude-sonnet-4-6` |
+| Scope | Project state — CLAUDE.md, rules, src/* (Glob only, no recursive reads), package.json |
+| Output | 5 sections: Stack / Architecture / Conventions / Key areas / Notable libraries |
+| Hard rules | Read-only; never reads spec; max 30 file Reads; concise (one-line bullets) |
+
+### `plan-decomposer`
+
+| Aspect | Value |
+|---|---|
+| Tools | `Read`, `Bash(wc/head/cat *)` |
+| Model | `claude-sonnet-4-6` |
+| Scope | ONLY the spec file passed in the prompt |
+| Output | List of `## Task N` blocks with title/type/complexity/description/criteria/(optional approach) |
+| Hard rules | Read-only; never reads project files; max 20 tasks; faithful to spec (no padding); imperative tense |
+
+## Boundaries
+
+**`/plan` reads**:
+- The spec file (required argument)
+- `CLAUDE.md`, `.claude/rules/*`, `package.json` / `pyproject.toml` / etc. (via `plan-context` agent)
+- `src/*/` directory listings (Glob, via `plan-context`)
+
+**`/plan` writes**:
+- `.claude/kaizen/plans/<slug>-<timestamp>.md` (new file per invocation)
+- `.gitignore` (one-time append of `.claude/kaizen/` if not already there)
+
+**`/plan` never touches**:
+- Source code (no Edit/Write tool for that).
+- `CLAUDE.md`, rules, settings, other agents.
+- `.git/` (no commits, no branches).
+- Other `.claude/kaizen/*` artifacts (`pending.md`, `analyze-report.md`, `preflight-report.md`).
+- Anything outside `$CLAUDE_PROJECT_DIR` (except the spec path, which may be elsewhere if absolute).
+
+## Versioning model: why plans accumulate
+
+`/analyze` and `/preflight` overwrite their reports on every run because their content is a **diagnostic snapshot**: you want "the latest state of the project" each time you ask.
+
+`/plan` is different. A plan is an **artifact of a planning session**, tied to a specific spec at a specific time. If the spec evolves, you want to be able to:
+- Compare the new plan against the old.
+- Reference the old plan in a code review or retrospective.
+- See which earlier plans were "completed" (the user marked them, kaizen doesn't track this in v0.6).
+
+So plans accumulate. Garbage collection (e.g., `--prune-older-than=30d`) is a v0.7+ concern; for now, `.claude/kaizen/plans/` grows monotonically. Since the dir is gitignored, this doesn't pollute the repo.
+
+## Relationship to other skills
+
+```mermaid
+flowchart LR
+    Init[/kaizen:init/] -.->|sets up| Config[(CLAUDE.md +<br/>rules)]
+    Spec[(spec file)] --> Plan[/kaizen:plan/]
+    Config --> Plan
+    Plan --> PlanFile[(plans/*.md)]
+    User[Developer<br/>does the work] --> Code[(source code)]
+    PlanFile -.->|guides| User
+    Code --> Preflight[/kaizen:preflight/]
+    Preflight --> PReport[(preflight-report.md)]
+    Code -.->|via git| Learn[/kaizen:learn/]
+    Learn --> Pending[(pending.md)]
+    Code --> Analyze[/kaizen:analyze/]
+    Analyze --> AReport[(analyze-report.md)]
+
+    classDef mutates fill:#fef3c7,stroke:#ca8a04;
+    classDef readonly fill:#dbeafe,stroke:#2563eb;
+    class Init,Learn mutates;
+    class Plan,Analyze,Preflight readonly;
+```
+
+In v0.6, `/plan` is **independent**: it doesn't auto-trigger other skills, isn't triggered by them, doesn't share files with them beyond living in `.claude/kaizen/`. v0.7 may add composition (e.g., `--seed-todos` to push plan tasks into TodoWrite; `--feed-to-preflight` to attach a plan reference to the next preflight report).
+
+## Failure modes
+
+| Failure | Behavior |
+|---|---|
+| Spec file doesn't exist | Stop with `✗ File not found: <path>` |
+| Binary file by extension | Stop with conversion suggestion |
+| Read returns garbled content | Treat as binary, same conversion suggestion |
+| Spec is empty | Stop with `✗ Spec file is empty. Nothing to plan.` |
+| One agent fails / returns garbled output | Log failure in plan file; mark affected sections `<unavailable>`; don't fail whole skill |
+| Decomposer returns zero tasks | Write plan with `## (no actionable tasks)` + Suggestions block |
+| `mkdir -p .claude/kaizen/plans` fails | Stop with filesystem error |
+| Spec >2000 lines / >100 KB | Warn but proceed; note "input was large" in plan header |
+
+## Comparison with `/preflight`
+
+Both are multi-agent skills, but with different shapes:
+
+| Aspect | `/preflight` | `/plan` |
+|---|---|---|
+| Phases | 3 (deterministic / LLM parallel / aggregate) | 4 (validate / setup / LLM parallel / synthesize / write) |
+| Phase 1 work | Bash commands (tests/typecheck/lint) | Light signal gathering (existence checks) |
+| Phase 2 work | LLM reasoning on diff + commit | LLM research on project + spec |
+| Agent output style | Production artifacts (findings, message) | Intermediate (profile, task list) — orchestrator synthesizes |
+| Skill role in Phase 3 | Verdict computation (deterministic logic) | Synthesis (LLM reasoning to merge agent outputs) |
+| Output file | Single, overwritten | Accumulating, versioned by timestamp |
+| Output role | Diagnostic snapshot | Durable artifact tied to a spec |
+
+The shape difference matters: `/preflight` is fast and ephemeral (gate before commit); `/plan` is deliberate and durable (artifact for execution and review).
+
+## Why this design
+
+Six choices specific to `/plan`:
+
+1. **Spec-as-input, not free-form prompt.** Reproducible, auditable, editable. Free-form prompts are ephemeral. v0.7+ may add `--from-prompt` as a quick mode.
+2. **Two research agents in parallel, synthesis in orchestrator.** Context and decomposition are genuinely independent inputs that parallelize naturally. The merge requires holding both outputs — that's the orchestrator's reasoning, not a third agent.
+3. **Plans accumulate, reports overwrite.** Diagnostics are snapshots; plans are durable artifacts. Different lifecycle.
+4. **Per-task annotation, not just titles.** Type, complexity, impact areas, dependencies, risks, criteria. Modern planning tools converge on this richness because tasks without it are wishes.
+5. **Dependency-ordered output.** Decomposer returns spec-order; orchestrator reorders by dependencies. The plan reads as an execution order.
+6. **Strict read-only, never executes.** v0.7+ may add `--execute` as a separate concern (autonomy boundaries, checkpointing) — premature in v0.6.

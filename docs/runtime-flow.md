@@ -2,11 +2,12 @@
 
 > Decision trees, action sequences, and worked scenarios. Mermaid diagrams render in GitHub, VS Code (Markdown Preview Mermaid Support), and most modern markdown viewers.
 
-**Covers four skills:**
+**Covers five skills (v0.6.0 — the v0 skill set is complete):**
 - **`/kaizen:init`** — sections 1–9 below.
 - **`/kaizen:learn`** — section 10.
 - **`/kaizen:analyze`** — section 11.
-- **`/kaizen:preflight`** — section 12 onward.
+- **`/kaizen:preflight`** — section 12.
+- **`/kaizen:plan`** — section 13 onward.
 
 For static structure see [architecture.md](./architecture.md). For end-user instructions see [user-manual.md](./user-manual.md).
 
@@ -1151,3 +1152,278 @@ For a 20-file diff in a TypeScript repo, expect ~15-25k tokens total. The determ
 | Token cost | High (multi-file generation) | Medium (per analysis) | Low–medium | Medium (bounded by diff size) |
 | Run frequency | 1× project lifetime | Weekly / per sprint | Ad hoc | Every PR/commit candidate |
 | Verdict output | Drift report | Proposals | Findings | **SHIP/HOLD/BLOCK** |
+
+---
+
+# 13. `/kaizen:plan` runtime
+
+## 13.1 Top-level sequence (full run)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User
+    participant Claude as Claude Code
+    participant Skill as plan/SKILL.md
+    participant Spec as <spec file>
+    participant Ctx as plan-context<br/>(Task subagent)
+    participant Decomp as plan-decomposer<br/>(Task subagent)
+    participant Plan as plans/<slug>-<ts>.md
+
+    User->>Claude: /kaizen:plan <spec-path>
+    Claude->>Skill: load SKILL.md
+
+    Note over Claude: Phase 0 — validate
+    Claude->>Spec: test -f + extension check
+    alt binary extension OR garbled
+        Claude->>User: ✗ conversion suggestion. STOP
+    end
+    Claude->>Spec: Read full spec
+
+    Note over Claude: Phase 1 — setup signals
+    Claude->>Spec: detect package.json, CLAUDE.md, etc. (test -f checks)
+
+    Note over Claude,Decomp: Phase 2 — parallel agents (single message, 2 Task calls)
+    par Project profile
+        Claude->>Ctx: Task(plan-context, project + signals)
+        Ctx-->>Claude: structured project profile<br/>(stack/architecture/conventions/key areas/libs)
+    and Spec decomposition
+        Claude->>Decomp: Task(plan-decomposer, spec path)
+        Decomp-->>Claude: raw task list in spec order
+    end
+
+    Note over Claude: Phase 3 — synthesis (no third agent)
+    Claude->>Claude: cross-reference each task with context<br/>(impact areas, deps, risks)
+    Claude->>Claude: reorder by dependencies<br/>(foundational first)
+    Claude->>Claude: cap at 20 tasks (group if more)
+
+    Note over Claude: Phase 4 — write
+    Claude->>Plan: mkdir + write <slug>-<ts>.md
+    Claude->>Plan: append .claude/kaizen/ to .gitignore (one-time)
+    Claude->>User: console summary + plan path + next-step commands
+```
+
+The **`par` block** is the same pattern as `/preflight`: two Task calls dispatched in a single message run in parallel.
+
+## 13.2 Phase decomposition
+
+```mermaid
+flowchart TD
+    Start([/kaizen:plan args]) --> Mode{Args?}
+
+    Mode -->|"list"| List[ls .claude/kaizen/plans/<br/>print available]
+    Mode -->|"show <id>"| Show[Read plan file<br/>print verbatim]
+    Mode -->|"<spec-path>"| Phase0
+
+    Phase0[Phase 0: validate]
+    Phase0 --> Exists{File exists?}
+    Exists -->|no| ErrNotFound[STOP — file not found]
+    Exists -->|yes| Ext{Binary<br/>extension?}
+    Ext -->|yes| ErrConvert[STOP — conversion suggestion]
+    Ext -->|no| ReadSpec[Read spec content]
+    ReadSpec --> Garbled{Looks binary?}
+    Garbled -->|yes| ErrConvert
+    Garbled -->|no| Phase1
+
+    Phase1[Phase 1: setup<br/>signal-level project checks]
+    Phase1 --> Phase2
+
+    Phase2[Phase 2: parallel agents<br/>plan-context + plan-decomposer<br/>single message, two Task calls]
+    Phase2 --> Phase3
+
+    Phase3[Phase 3: synthesis in skill<br/>cross-reference + reorder + cap]
+    Phase3 --> Phase4
+
+    Phase4[Phase 4: write plan file<br/>plans/<slug>-<ts>.md]
+    Phase4 --> Console[Print console summary + paths]
+    Console --> Done([DONE])
+
+    classDef stop fill:#fecaca,stroke:#dc2626;
+    classDef done fill:#dcfce7,stroke:#16a34a;
+    class ErrNotFound,ErrConvert stop;
+    class Done,List,Show done;
+```
+
+## 13.3 Synthesis (Phase 3) — what the orchestrator does
+
+The skill itself performs the merge. This is reasoning work, not LLM dispatch.
+
+```mermaid
+flowchart TD
+    Start[Inputs:<br/>context profile + raw task list] --> ForEach{For each task<br/>in raw list}
+
+    ForEach --> Impact[Match task title + criteria<br/>against context's key areas<br/>→ assign impact_areas]
+    Impact --> Deps[Scan criteria for<br/>references to other tasks<br/>→ assign depends_on]
+    Deps --> Risks[Check if impact area is<br/>flagged critical in context<br/>→ assign risks]
+    Risks --> Annotated[Task is now annotated]
+
+    Annotated --> More{More tasks?}
+    More -->|yes| ForEach
+    More -->|no| Reorder
+
+    Reorder[Topological sort by depends_on<br/>foundational tasks first<br/>break cycles by complexity]
+    Reorder --> Cap{Task count > 20?}
+    Cap -->|yes| Group[Group related tasks<br/>OR truncate with note]
+    Cap -->|no| Final[Final annotated plan]
+    Group --> Final
+```
+
+The synthesis happens entirely in the skill's reasoning loop (Claude reading both agent outputs in context). No separate Task call.
+
+## 13.4 Versioned-plan storage model
+
+Plans accumulate. The filename encodes both the spec source and the moment in time:
+
+```
+.claude/kaizen/plans/
+├── auth-rewrite-20260519-1030.md     ← initial plan from auth-rewrite.md spec
+├── auth-rewrite-20260520-1430.md     ← re-plan after spec updates
+├── refactor-payments-20260518-0900.md
+└── feature-search-20260517-1700.md
+```
+
+```mermaid
+flowchart LR
+    First[First run<br>auth-rewrite.md] --> File1[plans/auth-rewrite-20260519-1030.md]
+    Update[Spec evolves<br>auth-rewrite.md edited] --> Second[Re-run /kaizen:plan]
+    Second --> File2[plans/auth-rewrite-20260520-1430.md]
+    File1 -.coexist.-> File2
+    File1 -.diff against.-> File2
+```
+
+This is intentionally different from `/analyze` and `/preflight` (which overwrite their single report file each run). A plan is a **durable artifact tied to a spec at a point in time**, not a diagnostic snapshot.
+
+## 13.5 Worked scenarios
+
+### Scenario PL1 — first plan from a fresh spec
+
+State: feature branch with `docs/specs/auth-rewrite.md` (a markdown spec, ~80 lines).
+
+Run `/kaizen:plan docs/specs/auth-rewrite.md`:
+
+1. Phase 0: file exists, extension `.md` → safe. Read spec (~80 lines, fits comfortably).
+2. Phase 1: detect `package.json`, `CLAUDE.md`. Build signal brief.
+3. Phase 2 (parallel):
+   - `plan-context` reads CLAUDE.md, .claude/rules/*, globs `src/*/` → returns profile (`Stack: TS/Vue 3/Quasar`, key areas `src/api/auth/`, `src/stores/user.ts`).
+   - `plan-decomposer` reads spec → returns 7 raw tasks in spec order.
+4. Phase 3: orchestrator annotates each task (impact areas via key areas match, dependencies via criteria scan, risks for `auth` area). Reorders by deps (Task 1: schema migration → Task 2: JWT issuance → Task 3: middleware → ...). All within cap.
+5. Phase 4: writes `.claude/kaizen/plans/auth-rewrite-20260519-1030.md`.
+6. Console:
+   ```
+   ✓ kaizen plan: 7 tasks written
+
+   Plan: auth-rewrite
+   File: .claude/kaizen/plans/auth-rewrite-20260519-1030.md
+
+   Quick summary:
+     - 7 total tasks (4 feat, 2 test, 1 chore)
+     - 2 foundational (no dependencies)
+     - 3 with risks flagged
+
+   Next:
+     /kaizen:plan show auth-rewrite-20260519-1030
+     /kaizen:plan list
+   ```
+
+### Scenario PL2 — PDF spec (rejected)
+
+User runs `/kaizen:plan docs/specs/auth-rewrite.pdf`:
+
+1. Phase 0: file exists; extension `.pdf` → binary blocklist. STOP.
+2. Console:
+   ```
+   ✗ kaizen plan: detected PDF input — kaizen v0.6 cannot extract text from PDFs.
+
+     Convert it first and re-run:
+       macOS:    brew install poppler && pdftotext docs/specs/auth-rewrite.pdf docs/specs/auth-rewrite.txt
+       Linux:    sudo apt install poppler-utils && pdftotext docs/specs/auth-rewrite.pdf docs/specs/auth-rewrite.txt
+
+     Then: /kaizen:plan docs/specs/auth-rewrite.txt
+   ```
+3. No plan file written. No agents spawned.
+
+### Scenario PL3 — re-plan after spec evolution
+
+State: previous plan exists from Scenario PL1. User edited `docs/specs/auth-rewrite.md` (added a section on RBAC), runs `/kaizen:plan docs/specs/auth-rewrite.md` again 1 hour later.
+
+1. Same phases as PL1.
+2. New plan has 9 tasks (the 2 new RBAC tasks plus updates to existing ones).
+3. Phase 4 writes `auth-rewrite-20260519-1130.md` — **new file**, not overwriting the prior.
+4. User can `diff` the two plans to see what changed:
+   ```bash
+   diff .claude/kaizen/plans/auth-rewrite-20260519-1030.md \
+        .claude/kaizen/plans/auth-rewrite-20260519-1130.md
+   ```
+
+### Scenario PL4 — spec is too abstract (zero tasks)
+
+State: `docs/specs/improve-ux.md` is a one-paragraph wish ("make the app nicer").
+
+1. Phases 0-2 normal. Decomposer reads spec.
+2. Decomposer returns: `No actionable tasks extracted. Reason: spec is descriptive only, no concrete deliverables. Suggestion: add explicit acceptance criteria per capability.`
+3. Phase 3: skill sees zero tasks, writes a plan file with `## (no actionable tasks extracted)` and a Suggestions section.
+4. Console:
+   ```
+   ⚠ kaizen plan: 0 tasks extracted
+
+   The spec was too abstract for automatic decomposition.
+   See suggestions: .claude/kaizen/plans/improve-ux-20260519-1200.md
+   ```
+
+### Scenario PL5 — one agent fails
+
+State: normal run, but `plan-context` agent times out / returns garbled output.
+
+1. Phases 0-1 normal.
+2. Phase 2: `plan-decomposer` returns 6 tasks normally. `plan-context` returns malformed output.
+3. Phase 3: skill cannot cross-reference (no context profile). Falls back to:
+   - Task annotations: `impact areas: (unavailable — plan-context failed)`, `risks: (unavailable)`
+   - Order: keeps spec order (no dependency reordering possible without context).
+4. Phase 4 writes the plan with a header note: `## Project context (unavailable — plan-context agent failed)`.
+5. Skill returns the plan partially populated rather than crashing.
+
+### Scenario PL6 — `show latest`
+
+Run `/kaizen:plan show latest`:
+
+1. ls `.claude/kaizen/plans/`, pick most recent file.
+2. Read and print contents verbatim.
+3. No phases run. No agents spawned. Instant.
+
+## 13.6 Idempotency
+
+| Action | Idempotent? |
+|---|---|
+| `/kaizen:plan <spec>` | **No** — re-runs produce new files (versioned by timestamp). Content is similar but rarely identical (LLM variance). |
+| `/kaizen:plan list` | Yes — pure read. |
+| `/kaizen:plan show <id>` | Yes — pure read. |
+
+The intentional non-idempotency of generation is the point: each run produces a versioned artifact for comparison.
+
+## 13.7 Token cost characterization
+
+Approximate breakdown:
+
+| Phase | Tokens | Notes |
+|---|---|---|
+| Phase 0-1 (validate + signals) | ~1k | File checks, signal collection |
+| Phase 2 — plan-context | ~5-15k | Bounded by repo size, max 30 file reads |
+| Phase 2 — plan-decomposer | ~3-20k | Bounded by spec size; spec is the main variable |
+| Phase 3 — synthesis | ~3-8k | Reasoning over both agent outputs |
+| Phase 4 — write + report | ~2k | Formatting the plan file |
+
+**Total per plan**: roughly 15k-45k tokens, dominated by spec size and project size. For a typical mid-sized TS project with a 1-page spec, expect ~20-30k tokens.
+
+## 13.8 Comparison across all 5 skills
+
+| Aspect | `/init` | `/learn` | `/analyze` | `/preflight` | `/plan` |
+|---|---|---|---|---|---|
+| Trigger | Project setup | Periodic | Ad hoc | Before commit | Before work starts |
+| Input | Project state | Git history | Project state | Git diff | Spec doc + project state |
+| Output | Many config files | `pending.md` | `analyze-report.md` | `preflight-report.md` | `plans/<slug>-<ts>.md` (accumulating) |
+| State machine | No | Yes (pending) | No | No | No |
+| Mutates config | Yes | Yes (via apply) | Never | Never | Never |
+| Subagents | Optional (archeology) | None | None | 2 (parallel) | **2 (parallel)** |
+| Output style | Per-file write | Proposal+apply | Snapshot | Snapshot with verdict | Versioned artifact |
+| Re-run behavior | Refuses (without `--force`) | State-machine guarded | Overwrites snapshot | Overwrites snapshot | Adds new file |
+| Verdict-style output | Drift report | Proposals | Findings | SHIP/HOLD/BLOCK | Annotated task tree |

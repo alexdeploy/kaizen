@@ -75,15 +75,16 @@ Welcome. This folder documents how the kaizen plugin behaves **once it's install
 
 ## Version
 
-This documentation tracks kaizen **v0.5.0**. Currently shipped commands:
+This documentation tracks kaizen **v0.6.0** — the v0 skill set is complete. Currently shipped commands:
 
 - `/kaizen:init` — bootstrap (covered in detail throughout these docs)
 - `/kaizen:learn` — propose CLAUDE.md updates from git activity (see [user-manual.md](./user-manual.md#kaizenlearn-arguments))
 - `/kaizen:analyze` — read-only audit (best-practices / coverage / architecture). See [user-manual.md](./user-manual.md#kaizenanalyze-arguments).
 - `/kaizen:preflight` — pre-merge gate (tests + typecheck + lint + security review + commit msg) with SHIP/HOLD/BLOCK verdict. See [user-manual.md](./user-manual.md#kaizenpreflight-arguments).
+- `/kaizen:plan` — auto-planner from a spec doc, with multi-agent decomposition. See [user-manual.md](./user-manual.md#kaizenplan-arguments).
 
 Plugin-level agents shipped:
-- `preflight-security` — security audit scoped to changed files
-- `commit-suggester` — Conventional Commits message author
+- `preflight-security`, `commit-suggester` — invoked by `/kaizen:preflight`
+- `plan-context`, `plan-decomposer` — invoked by `/kaizen:plan`
 
-Future commands (`/kaizen:plan`) will get their own sections once shipped.
+After v0.6.0, focus shifts to polish + new flags rather than new top-level skills.

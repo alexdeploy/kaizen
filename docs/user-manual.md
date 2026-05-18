@@ -62,11 +62,12 @@ You'll see Claude run `detect.sh`, report what it found, and either generate fil
 
 ## Command reference
 
-Commands shipped in v0.5.0:
+Commands shipped in v0.6.0:
 - [`/kaizen:init`](#kaizeninit-arguments) — bootstrap project config
 - [`/kaizen:learn`](#kaizenlearn-arguments) — propose config updates from git activity
 - [`/kaizen:analyze`](#kaizenanalyze-arguments) — read-only audit of code vs. stated rules
 - [`/kaizen:preflight`](#kaizenpreflight-arguments) — pre-merge gate (tests + LLM review + verdict)
+- [`/kaizen:plan`](#kaizenplan-arguments) — auto-planner: spec doc → annotated task tree
 
 ### `/kaizen:init [arguments]` {#kaizeninit-arguments}
 
@@ -468,6 +469,151 @@ Both are plugin agents (live in `plugins/kaizen/agents/`) — they're **not** th
 - **No auto-fix in v0.5**: `--auto-fix` for lint/format is deferred to v0.6.
 - **Spawns at most 2 subagents per run**, both in parallel. No recursive spawning.
 - **Changed-files-only scope** for security agent — token cost grows with change size, not project size.
+
+### `/kaizen:plan <spec-path> [list|show <plan-id>]` {#kaizenplan-arguments}
+
+Auto-planner. Reads a written specification document and produces a **structured, dependency-ordered, annotated task tree**. Dispatches `plan-context` and `plan-decomposer` agents in parallel; synthesizes their outputs into the final plan.
+
+#### Subcommands
+
+| Subcommand | Action |
+|---|---|
+| `<path-to-spec>` | Generate a new plan from the spec file. |
+| `list` | List all plans saved in `.claude/kaizen/plans/`. |
+| `show <plan-id>` | Print a specific plan verbatim. `<plan-id>` is the filename without `.md`. `show latest` resolves to the most recent plan. |
+
+#### Supported input formats
+
+Any **text** file. The skill doesn't whitelist by extension — `.md`, `.txt`, `.rst`, `.adoc`, README, SPEC, plain text all work.
+
+**Binary formats** (`.pdf`, `.docx`, `.doc`, `.odt`, `.rtf`, `.pages`, `.epub`, `.mobi`) are rejected with a conversion suggestion:
+
+```
+✗ kaizen plan: detected PDF input — kaizen v0.6 cannot extract text from PDFs.
+
+  Convert it first and re-run:
+    macOS:    brew install poppler && pdftotext spec.pdf spec.txt
+    Linux:    sudo apt install poppler-utils && pdftotext spec.pdf spec.txt
+    DOCX:     pandoc spec.docx -o spec.md
+
+  Then: /kaizen:plan <converted-file>
+```
+
+v0.7+ may add auto-conversion if `pdftotext` / `pandoc` are detected on PATH.
+
+#### What gets generated
+
+A plan file at `.claude/kaizen/plans/<slug>-<YYYYMMDD-HHMM>.md`. **Plans accumulate** — unlike `/learn`'s `pending.md` or `/analyze`'s `analyze-report.md` (overwritten each run), re-planning the same spec produces a new file with a different timestamp. This lets you compare plan evolutions.
+
+#### Plan structure
+
+```markdown
+# Plan: <spec-name>
+
+Generated: <ISO 8601>
+Plugin version: 0.6.0
+Spec source: <path>
+Tasks: <N>
+
+## Project context (auto-detected)
+Stack: TypeScript / Vue 3 / Quasar / Pinia
+Convention notes: <2-3 lines>
+**Key areas potentially affected**: src/api/, src/stores/
+
+---
+
+## Task 1: Replace mock auth with JWT issuance
+**Type**: feat
+**Complexity**: medium (2-8h)
+**Impact areas**: `src/api/auth/`, `src/stores/user.ts`
+**Depends on**: none
+**Risks**: schema migration of `users` table required
+
+### Description
+Replace the dev mock auth handler with real JWT issuance to enable cross-service authentication.
+
+### Acceptance criteria
+- [ ] `/api/login` returns JWT signed with `JWT_SECRET`
+- [ ] Token TTL = 24h, refresh token TTL = 7d
+- [ ] Existing session middleware unchanged
+
+### Suggested approach
+Use `jsonwebtoken` (already in deps). Add `JWT_SECRET` to env validation.
+
+---
+
+## Task 2: ...
+
+## Summary
+- Total tasks: 8 (5 feat, 2 test, 1 chore)
+- Foundational (no deps): Tasks 1, 4
+- Estimated effort: medium-to-large
+```
+
+#### Task annotations
+
+Each task is annotated with:
+
+| Field | Values |
+|---|---|
+| `type` | `feat` / `fix` / `refactor` / `docs` / `test` / `chore` / `infra` / `spike` |
+| `complexity` | `trivial` (<30min) / `small` (1-2h) / `medium` (2-8h) / `large` (1-3d) / `epic` (split me) |
+| `impact areas` | Directories likely touched, inferred from project context |
+| `depends on` | Other tasks that must complete first (or `none`) |
+| `risks` | One-line if the area is flagged critical (auth, payments, migrations); `none` otherwise |
+| `acceptance criteria` | 2-5 specific testable bullets |
+
+Tasks are **ordered by dependencies**, not by their appearance in the spec.
+
+#### Typical workflow
+
+```
+# Generate a plan from a spec file:
+/kaizen:plan docs/specs/auth-rewrite.md
+
+# Read the plan in detail:
+/kaizen:plan show auth-rewrite-20260519-1030
+
+# See all plans accumulated:
+/kaizen:plan list
+
+# Edit the plan file by hand if needed (it's just markdown), then execute manually.
+# Re-plan later (e.g., after spec changes): produces a new file with a new timestamp.
+```
+
+#### Architecture (the agents involved)
+
+`/kaizen:plan` is a 4-phase orchestrator:
+
+1. **Phase 0 — validate**: extension check, binary detection, file read.
+2. **Phase 1 — setup**: light project signals (existence of CLAUDE.md, package.json, etc.).
+3. **Phase 2 — parallel agents** (two `Task` calls in one message):
+   - `plan-context` profiles the project (stack, architecture, conventions, key areas).
+   - `plan-decomposer` reads ONLY the spec and produces a raw task list.
+4. **Phase 3 — synthesis** (in the skill, no third agent): cross-references each task with project context to add impact areas, dependencies, risks; reorders by dependency; caps at 20 tasks.
+5. **Phase 4 — write**: produces the plan file under `.claude/kaizen/plans/`.
+
+#### Limits and safety
+
+- **Strictly read-only** except for the plan file. Never modifies source code, never executes the plan.
+- **Max 20 tasks per plan in v0.6.** If the spec produces more, decomposer groups related tasks. If still too many, the report notes "spec may be too broad — consider splitting".
+- **Spec size warning** if >2000 lines or >100 KB — proceeds but notes large input in the plan header.
+- **No external API calls** in v0.6 — purely local file analysis.
+- **No execution mode** in v0.6 — `--execute` is a v0.7+ concern (autonomy boundaries, checkpointing).
+
+#### Composition with other skills
+
+Independent in v0.6. You can manually chain:
+
+```
+/kaizen:analyze --architecture     # see current architecture
+/kaizen:plan docs/specs/new.md     # plan against current state
+# (work the tasks)
+/kaizen:preflight                  # gate before commit
+/kaizen:learn                      # propose config updates from what was done
+```
+
+v0.7 may add explicit composition flags (e.g., `--seed-todos` to push plan tasks into TodoWrite).
 
 ## Troubleshooting
 

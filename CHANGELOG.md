@@ -10,11 +10,32 @@ While v0.x, **minor versions may include breaking changes**. From v1.0.0 onward,
 
 ## [Unreleased]
 
-### Planned
-- `/kaizen:plan` — turn spec doc into structured task tree (auto-planificador).
-- `/kaizen:preflight` v0.6 — `--base=<ref>`, `--skip=<checks>`, `--auto-fix` flags; risk-aware sizing; commit style auto-detection.
-- `/kaizen:analyze` v0.6 — additional modes: `--dependencies` (npm outdated, audit), `--security`, `--complexity`.
-- `/kaizen:learn` v0.6 — `--include-session` flag (analyze current Claude Code session for user corrections).
+### Planned (focus shifts to polish + UX improvements after v0.6.0)
+- `/kaizen:learn` v0.7 — `--include-session` flag (analyze current session conversation for user corrections); make commit range more visible in the report header.
+- `/kaizen:analyze` v0.7 — additional modes: `--dependencies` (npm outdated/audit), `--security`, `--complexity`.
+- `/kaizen:preflight` v0.7 — `--base=<ref>`, `--skip=<checks>`, `--auto-fix` flags; risk-aware sizing; commit style auto-detection from history.
+- `/kaizen:plan` v0.7 — inline prompt input (`--from-prompt`); gh issue input (`--from-issue`); auto-conversion of PDF/DOCX if `pdftotext`/`pandoc` installed; `--seed-todos` to push to TodoWrite.
+
+---
+
+## [0.6.0] — 2026-05-19
+
+### Added
+- **New skill `/kaizen:plan`**: auto-planner that turns a written specification into a structured, dependency-ordered task tree.
+  - **Input**: any text-format spec file (markdown, txt, rst, adoc, plain). Binary formats (PDF, DOCX, ODT, RTF) detected by extension and rejected with explicit conversion suggestion (`pdftotext` / `pandoc`).
+  - **4-phase execution**: validate → setup signals → **parallel agents** → synthesis → write.
+  - **2 new plugin-level agents** (parallel via single-message dual-Task dispatch, mirroring `/preflight`):
+    - `plan-context` — reads project state (CLAUDE.md, rules, `src/*/`, package.json) and produces a project profile (stack, architecture, conventions, key areas, libraries).
+    - `plan-decomposer` — reads ONLY the spec and produces a raw task list with type/complexity/acceptance criteria. Doesn't touch project state.
+  - **Synthesis in the orchestrator (no third agent)**: cross-references each task with the project context to add impact areas, dependencies, and risks. Reorders tasks by dependencies (foundational first). Caps at 20 tasks.
+  - **Output**: `.claude/kaizen/plans/<slug>-<YYYYMMDD-HHMM>.md`. Plans **accumulate** (versioned by timestamp) unlike `/learn`'s `pending.md` or `/analyze`'s `analyze-report.md` (which overwrite).
+  - **Subcommands**: `list` (show all plans), `show <plan-id>` (print specific plan; `latest` resolves to most recent).
+  - **Read-only contract**: no source modifications, no auto-execution. The plan is the artifact.
+
+### Architectural note
+- v0.6.0 closes the planned skill set for kaizen v0.x. After this, focus shifts to UX polish, signal-source expansion (`/learn` v0.7), and additional analyze modes (`/analyze` v0.7) rather than new top-level skills.
+- The parallel-Task pattern is now used by both `/preflight` (v0.5.0) and `/plan` (v0.6.0). Both follow the same shape: parallel research agents + skill-level synthesis. `/plan` adds the "plans accumulate" pattern (vs. single-file overwrite).
+- v0.7+ may add `--execute` as a separate concern (autonomy boundaries, checkpointing) — premature in v0.6.
 
 ---
 
