@@ -62,7 +62,7 @@ You'll see Claude run `detect.sh`, report what it found, and either generate fil
 
 ## Command reference
 
-Commands shipped in v0.7.0:
+Commands shipped in v0.8.0:
 - [`/kaizen:init`](#kaizeninit-arguments) — bootstrap project config
 - [`/kaizen:learn`](#kaizenlearn-arguments) — propose config updates from git activity
 - [`/kaizen:analyze`](#kaizenanalyze-arguments) — read-only audit of code vs. stated rules
@@ -398,14 +398,24 @@ Modes run: --best-practices, --coverage, --architecture
 
 Pre-merge sanity check. Runs deterministic checks (tests, typecheck, lint) sequentially, then dispatches two specialized agents (security review + commit message suggestion) **in parallel**, then aggregates everything into a single **SHIP / HOLD / BLOCK** verdict. Use it before committing or opening a PR.
 
-#### Subcommands
+#### Subcommands and flags
 
-| Subcommand | Action |
+| Arg | Action |
 |---|---|
 | *(none)* | Run full preflight — all 5 checks |
 | `show` | Re-print the last report from `.claude/kaizen/preflight-report.md` without re-running |
+| `--base=<ref>` | Override the auto-detected base ref. Examples: `--base=develop`, `--base=v1.0.0`, `--base=HEAD~3`. If the ref doesn't exist, kaizen stops with an error (no silent fallback). |
+| `--skip=<checks>` | Skip specific checks. CSV of: `tests`, `typecheck`, `lint`, `security`, `commit`. Example: `--skip=security,commit` runs only the deterministic trio. Skipped checks appear in the report and never affect the verdict. |
+| `--auto-fix` | **Opt-in mutation**. Before running lint, applies safe auto-fixes per stack (`eslint --fix` + `prettier --write` for JS/TS; `ruff check --fix` + `ruff format` for Python; `gofmt -w` for Go; `cargo fmt` for Rust). Warns if git tree is dirty. Files modified are listed in the report header. |
 
-(v0.6 will add `--base=<ref>`, `--skip=<checks>`, `--auto-fix`.)
+Flags combine freely: `/kaizen:preflight --base=develop --skip=security --auto-fix`. `show` is exclusive — ignores other flags.
+
+**`--auto-fix` safety**: it's the only way kaizen modifies source code anywhere. The default behavior remains strictly read-only. When used:
+- Run on a clean git tree if possible (warn surfaces otherwise).
+- The list of modified files goes in the report so you can `git diff` and inspect.
+- If a subsequent step fails after auto-fix already ran, files stay modified (no rollback) — you can `git checkout -- .` to undo if you don't like the result.
+
+(v0.9 will add: risk-aware sizing for the security agent; commit style auto-detection from `git log`.)
 
 #### What gets checked
 
@@ -431,7 +441,7 @@ Skipped checks (no tooling installed) **never** trigger a verdict — they're re
 
 #### Base ref auto-detection
 
-`/kaizen:preflight` compares your current state against a base ref:
+When `--base=<ref>` is NOT given, `/kaizen:preflight` compares your current state against a base ref:
 
 | Current branch | Base ref used |
 |---|---|
@@ -439,7 +449,7 @@ Skipped checks (no tooling installed) **never** trigger a verdict — they're re
 | `master` | `HEAD~1` |
 | any other branch | `main` (if exists), else `master`, else `HEAD~1` |
 
-Override via `--base=<ref>` planned for v0.6.
+Override with `--base=<ref>` whenever needed (e.g., git-flow with `develop` as the integration branch).
 
 #### Typical workflow
 
@@ -489,11 +499,13 @@ Both are plugin agents (live in `plugins/kaizen/agents/`) — they're **not** th
 
 #### Limits and safety
 
-- **Strictly read-only** except for the report file. Never modifies source code, never commits.
+- **Read-only by default** except for the report file. The only exception is `--auto-fix`, which is opt-in and runs your configured formatters/linters (kaizen itself never edits files manually).
+- **Never auto-commits** — even with SHIP verdict, even with `--auto-fix`.
 - **Bounded output**: deterministic check commands have output capped at 50 lines (tail kept).
-- **No auto-fix in v0.5**: `--auto-fix` for lint/format is deferred to v0.6.
 - **Spawns at most 2 subagents per run**, both in parallel. No recursive spawning.
 - **Changed-files-only scope** for security agent — token cost grows with change size, not project size.
+- **`--base` validation is strict**: if the ref doesn't exist, kaizen stops rather than silently falling back. Typos surface as errors.
+- **`--skip` requires at least one check left**: rejects `--skip=tests,typecheck,lint,security,commit` (everything skipped → nothing to do).
 
 ### `/kaizen:plan <spec-path> [list|show <plan-id>]` {#kaizenplan-arguments}
 

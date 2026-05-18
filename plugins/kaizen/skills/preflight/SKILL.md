@@ -1,8 +1,8 @@
 ---
 description: Pre-merge sanity check. Runs tests, typecheck, lint, security review (changed files only), and suggests a conventional commit message. Produces a single SHIP/HOLD/BLOCK verdict.
 disable-model-invocation: true
-argument-hint: "[show]"
-allowed-tools: Read, Write, Glob, Grep, Bash(git status), Bash(git rev-parse *), Bash(git diff *), Bash(git log *), Bash(git branch *), Bash(git show *), Bash(git symbolic-ref *), Bash(npm test *), Bash(npm run *), Bash(npx tsc *), Bash(npx eslint *), Bash(npx prettier *), Bash(pnpm test *), Bash(pnpm run *), Bash(yarn test *), Bash(yarn run *), Bash(bun test *), Bash(bun run *), Bash(pytest *), Bash(mypy *), Bash(ruff *), Bash(go test *), Bash(go vet *), Bash(cargo test *), Bash(cargo check *), Bash(test *), Bash(ls *), Bash(cat *), Bash(mkdir *), Task
+argument-hint: "[show] [--base=<ref>] [--skip=<checks>] [--auto-fix]"
+allowed-tools: Read, Write, Glob, Grep, Bash(git status), Bash(git rev-parse *), Bash(git diff *), Bash(git log *), Bash(git branch *), Bash(git show *), Bash(git symbolic-ref *), Bash(npm test *), Bash(npm run *), Bash(npx tsc *), Bash(npx eslint *), Bash(npx eslint --fix *), Bash(npx prettier *), Bash(npx prettier --write *), Bash(pnpm test *), Bash(pnpm run *), Bash(yarn test *), Bash(yarn run *), Bash(bun test *), Bash(bun run *), Bash(pytest *), Bash(mypy *), Bash(ruff *), Bash(ruff check --fix *), Bash(ruff format *), Bash(go test *), Bash(go vet *), Bash(go fmt *), Bash(gofmt *), Bash(cargo test *), Bash(cargo check *), Bash(cargo fmt *), Bash(test *), Bash(ls *), Bash(cat *), Bash(mkdir *), Task
 ---
 
 # /kaizen:preflight
@@ -26,11 +26,17 @@ This is the **operational counterpart** to `/init`, `/learn`, `/analyze`:
 |---|---|
 | *(none)* | Run full preflight: tests + typecheck + lint + security review + commit suggestion |
 | `show` | Re-print the last report from `.claude/kaizen/preflight-report.md`. Does not re-run checks. |
+| `--base=<ref>` | Override the auto-detected base ref. Examples: `--base=develop`, `--base=v1.0.0`, `--base=HEAD~3`. When omitted, auto-detection runs (see Step 1). |
+| `--skip=<checks>` | Skip specific checks. CSV of check names: `tests`, `typecheck`, `lint`, `security`, `commit`. Example: `--skip=security,commit` runs only the deterministic trio. Skipped checks appear in the report as `skipped (--skip)` and never affect the verdict. |
+| `--auto-fix` | **Before** running lint, attempt safe auto-fixes per stack: `eslint --fix` + `prettier --write` (JS/TS), `ruff check --fix` + `ruff format` (Python), `gofmt -w` (Go), `cargo fmt` (Rust). **MODIFIES SOURCE FILES** — opt-in only, never default. Recommended only on a clean git tree (warn if uncommitted changes exist). Lint then reports what auto-fix couldn't resolve. |
 
-Future args planned for v0.6+ (DO NOT implement in v0.5):
-- `--base=<ref>` — override the base ref for the diff
-- `--skip=<check,check>` — skip specific checks
-- `--auto-fix` — apply auto-fixes for lint/format before failing
+Flag parsing rules:
+- All flags can combine: `/kaizen:preflight --base=main --skip=security --auto-fix`.
+- `show` is exclusive — ignores other flags.
+
+Future args planned for v0.9+ (DO NOT implement in v0.8):
+- Risk-aware sizing (lighter security review for small diffs)
+- Commit style auto-detection from `git log` (vs. always-Conventional Commits)
 
 ---
 
@@ -50,12 +56,19 @@ Otherwise: print the file verbatim.
 
 Execute the 7 steps below **in order**. Step 5 spawns subagents **in parallel** (single message with multiple Task tool calls).
 
-### Step 1: detect base ref
+### Step 1: resolve base ref
 
-Determine what to diff against. Use the **first** applicable:
+**If `--base=<ref>` was provided in `$ARGUMENTS`**, use that value directly. Verify it exists:
 
 ```bash
-# 1. Current branch
+git rev-parse --verify <user_base> 2>/dev/null
+```
+
+If verification fails, **stop with a clear error** — do not silently fall back. The user explicitly named the ref; if it's wrong, that's a typo to surface.
+
+**Otherwise (auto-detection)**, use the **first** applicable:
+
+```bash
 git symbolic-ref --short HEAD 2>/dev/null
 ```
 
@@ -65,13 +78,13 @@ git symbolic-ref --short HEAD 2>/dev/null
 | `master` | `HEAD~1` |
 | anything else | `main` (if exists), else `master`, else `HEAD~1` |
 
-Verify the base ref exists:
+Verify the chosen base ref exists:
 
 ```bash
 git rev-parse --verify <base_ref> 2>/dev/null
 ```
 
-If verification fails, fall back to `HEAD~1`. Surface the chosen base in the report.
+If verification fails, fall back to `HEAD~1`. Surface the chosen base — and whether it was auto-detected vs. user-specified — in the report.
 
 ### Step 2: enumerate changed files
 
@@ -104,20 +117,62 @@ Build a map: which check command for each phase, OR `skip` if not detectable:
 
 If a check has no detectable command, mark its result as `skip (no <tool> detected)`. Do NOT fail the verdict on a skipped check.
 
+### Step 3.5: auto-fix (only if `--auto-fix` in `$ARGUMENTS`)
+
+**Skip this step entirely if `--auto-fix` was not passed.** Default behavior is read-only.
+
+If `--auto-fix` is present:
+
+1. **Check for uncommitted changes**:
+   ```bash
+   git status --porcelain
+   ```
+   If output is non-empty, **warn** the user but proceed:
+   ```
+   ⚠ --auto-fix on a dirty git tree. Auto-fixes will mix with your uncommitted edits.
+     Recommended: commit or stash WIP first. Proceeding anyway.
+   ```
+
+2. **Run the auto-fix commands** per detected stack. Sequential is fine — these are deterministic.
+
+   | Stack | Commands to attempt (skip if tool not detected) |
+   |---|---|
+   | TypeScript / JavaScript | `npx eslint --fix .` then `npx prettier --write .` |
+   | Python | `ruff check --fix .` then `ruff format .` |
+   | Go | `gofmt -w .` (or `go fmt ./...`) |
+   | Rust | `cargo fmt` |
+
+   For each command: capture exit code + output (bounded 50 lines). Tools that aren't installed are silently skipped — `--auto-fix` is best-effort.
+
+3. **Detect what changed** after the fixes:
+   ```bash
+   git diff --name-only
+   ```
+   Track this list — it goes into the report so the user knows what was modified.
+
+4. **Proceed to Step 4** (lint will now report only what auto-fix couldn't resolve).
+
 ### Step 4: run deterministic checks (sequential)
 
 For each phase (tests → typecheck → lint), run the resolved command via Bash. **Capture**: exit code, full output. **Bound** output to last 50 lines if longer (keep tail; failures are usually at the end).
 
+**If `--skip=<checks>` was provided**, skip any check whose name appears in the CSV. Valid names: `tests`, `typecheck`, `lint`, `security`, `commit`. Skipped checks are reported but never affect the verdict.
+
 For each result, classify:
 - `pass` — exit 0
 - `fail` — exit non-zero
-- `skip` — no command resolved
+- `skip` — no command resolved OR explicitly skipped via `--skip`
 
 Don't stop on first failure — collect all three before moving on. This lets the user see the full picture, not iterate one fix at a time.
 
 ### Step 5: spawn LLM agents in parallel
 
-In a **single message**, issue TWO `Task` tool calls:
+**If `--skip=<checks>` was provided**, check whether `security` and/or `commit` are in the skip list:
+- If both are skipped, omit Phase 2 entirely.
+- If only one is skipped, only spawn the other agent.
+- If neither is skipped, spawn both (default behavior below).
+
+In a **single message** (when spawning multiple), issue the `Task` tool call(s):
 
 **Call 1**:
 - `subagent_type`: `preflight-security`
@@ -166,8 +221,11 @@ Write `.claude/kaizen/preflight-report.md` (overwrite each run) with this exact 
 
 Generated: <ISO 8601 timestamp>
 Plugin version: <version>
-Base ref: <base_ref>
+Base ref: <base_ref> (<auto-detected | --base override>)
 Changed files: <count> source files (+ <N> non-source)
+Flags: <comma-separated list of flags passed, or "none">
+<if --auto-fix was used:>
+Auto-fix applied: <N files modified> (<comma-separated short list>)
 
 ---
 
@@ -253,14 +311,15 @@ Use ✓ for pass, ✗ for fail, ⚠ for warning-only, ⊘ for skip, ℹ for info
 
 ## Hard rules (never violate)
 
-- **NEVER modify source code.** preflight is a gate, not a fixer. Auto-fix flags are deferred to v0.6.
-- **NEVER auto-commit** even if SHIP verdict. The user commits.
-- **NEVER skip checks silently.** A skipped check is shown explicitly with the reason ("no `tsc` in devDeps").
-- **NEVER block on a check that was skipped** for tooling reasons.
+- **NEVER modify source code UNLESS `--auto-fix` was passed.** Without that flag, preflight is strictly read-only. With it, the modifications are limited to what the configured formatters/linters do — kaizen itself never edits files manually.
+- **NEVER auto-commit** — even if SHIP verdict, even with `--auto-fix`. The user commits.
+- **NEVER skip checks silently.** A skipped check is shown explicitly with the reason (`"no \`tsc\` in devDeps"` for tooling skips, `"skipped (--skip)"` for explicit skips).
+- **NEVER block on a check that was skipped** for tooling reasons OR via `--skip`.
 - **NEVER read files outside `cwd`.**
 - **Bound output**: max 50 lines per check command output. Tail kept (failures usually end-of-output).
-- **Always run all three deterministic checks** before spawning agents. Don't fail-fast on first deterministic failure.
-- **Spawn both agents in a single message** (parallel via Task), not sequential.
+- **Always run all three deterministic checks** before spawning agents (unless individually skipped via `--skip`). Don't fail-fast on first deterministic failure.
+- **Spawn agents in a single message** (parallel via Task) when both are needed. If only one survives `--skip`, spawn just that one.
+- **If `--base` is given and the ref is invalid, STOP** — do not silently fall back. The user named it explicitly; a typo deserves an error, not a guess.
 
 ---
 
@@ -274,6 +333,11 @@ Use ✓ for pass, ✗ for fail, ⚠ for warning-only, ⊘ for skip, ℹ for info
 | All three deterministic check commands resolve to skip | Run agents anyway, but warn in the report that no deterministic checks fired. |
 | Agent fails or returns garbled output | Log the failure in the report's relevant section; verdict computed from the parts that succeeded. Do not fail the whole preflight. |
 | Diff is huge (>1000 files) | Run anyway but warn in report. Agents work on the source-filtered subset, which should be smaller. |
+| `--base=<ref>` ref doesn't exist | Stop with `✗ Base ref '<ref>' not found. Available refs: <list>`. Do not auto-fall-back. |
+| `--skip=<x>` includes an unknown check name | Warn (`⚠ Unknown skip target 'x' — ignored. Valid: tests, typecheck, lint, security, commit`). Continue with the rest. |
+| `--skip` includes ALL checks | Refuse with `✗ --skip excluded every check. Nothing to do.` |
+| `--auto-fix` but no fixers detected for the stack | Skip Step 3.5 silently, log in report: "auto-fix requested but no formatters/linters detected for <stack>". |
+| `--auto-fix` modifies files but a subsequent step fails | Files stay modified (no rollback). Report makes clear what was auto-fixed BEFORE the failure. User decides whether to keep or `git checkout` the changes. |
 
 ---
 

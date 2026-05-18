@@ -813,7 +813,7 @@ Six deliberate choices specific to `/preflight`:
 3. **Parallel agent dispatch is real.** Two `Task` calls in one message ≈ 2× wall-clock speedup vs. sequential. Cost is the same. Always parallelize independent agent work.
 4. **Three-tier verdict.** SHIP/HOLD/BLOCK gives more signal than green/red. Distinguishes "fix before merging" from "don't merge at all" — actionable difference.
 5. **Plugin agents over project agents (for this skill).** `preflight-security` lives in the plugin so every kaizen user gets consistent security review. The user's `code-reviewer.md` (from `/init`) stays for manual general-purpose review — two agents, two jobs.
-6. **Read-only contract.** Same as `/analyze`. Auto-fix is tempting but dangerous; deferring to v0.6 lets us see what users actually want fixed automatically vs. left for manual decision.
+6. **Read-only contract, with opt-in mutation (v0.8+).** Same as `/analyze` by default. v0.8 added `--auto-fix` as the single opt-in escape from read-only — and it's bounded to what the configured formatters/linters do (kaizen never edits files manually). Risk-aware sizing and commit style auto-detection remain deferred to v0.9 because each carries calibration risk that needs more design.
 
 ---
 

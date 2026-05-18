@@ -3,12 +3,12 @@
 > 改善 (kaizen) = continuous improvement.
 > A Claude Code plugin that scaffolds a complete, adapted `.claude/` setup for any project — empty or existing — and (in future versions) evolves it as the project grows.
 
-## What it does today (v0.7.0)
+## What it does today (v0.8.0)
 
 - `/kaizen:init` — analyzes your project (stack, maturity, git state, existing config) and generates a tailored `CLAUDE.md`, `.claude/settings.json`, path-scoped rules, a code-reviewer agent, and hooks. Outputs a per-file drift report.
 - `/kaizen:learn` — analyzes recent git activity (default: last 10 commits; `--since=<ref>` or `--limit=<N>` to scope) and proposes updates to `CLAUDE.md` / `.claude/rules/`. Writes proposals to `.claude/kaizen/pending.md` for review. Subcommands: `show`, `apply`, `discard`. Range analyzed is always shown up front. **Never modifies your config without explicit approval.**
 - `/kaizen:analyze` — read-only audit of the project against its own conventions and rules. Modes: `--best-practices`, `--coverage`, `--architecture`. Writes report to `.claude/kaizen/analyze-report.md`.
-- `/kaizen:preflight` — pre-merge gate. Runs tests/typecheck/lint sequentially, then dispatches `preflight-security` + `commit-suggester` agents in parallel. **SHIP / HOLD / BLOCK** verdict. Writes report to `.claude/kaizen/preflight-report.md`.
+- `/kaizen:preflight` — pre-merge gate. Runs tests/typecheck/lint sequentially, then dispatches `preflight-security` + `commit-suggester` agents in parallel. **SHIP / HOLD / BLOCK** verdict. Writes report to `.claude/kaizen/preflight-report.md`. Flags: `--base=<ref>` (override base), `--skip=<checks>` (skip specific checks), `--auto-fix` (opt-in: applies lint/format fixes to source before checking).
 - `/kaizen:plan` — auto-planner. Reads a spec doc, dispatches `plan-context` + `plan-decomposer` agents in parallel, synthesizes an annotated task tree (type/complexity/dependencies/risks). Plans accumulate at `.claude/kaizen/plans/<slug>-<timestamp>.md`. Subcommands: `list`, `show`.
 
 ## Plugin-level agents (shipped with kaizen)
@@ -24,7 +24,7 @@
 
 - `/kaizen:learn` v0.7 — `--include-session` flag, better range visibility.
 - `/kaizen:analyze` v0.7 — `--dependencies`, `--security`, `--complexity` modes.
-- `/kaizen:preflight` v0.7 — `--base`, `--skip`, `--auto-fix` flags; commit style auto-detection.
+- `/kaizen:preflight` v0.9 — risk-aware sizing; commit style auto-detection.
 - `/kaizen:plan` v0.7 — inline prompt input, gh issue input, auto-conversion of PDF/DOCX, `--seed-todos`.
 
 ## Repo layout

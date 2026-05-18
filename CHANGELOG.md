@@ -11,10 +11,33 @@ While v0.x, **minor versions may include breaking changes**. From v1.0.0 onward,
 ## [Unreleased]
 
 ### Planned (polish + UX improvements; no new top-level skills)
-- `/kaizen:learn` v0.8 — `--include-session` flag (analyze current Claude Code session conversation for user corrections — needs careful design around accessing the transcript).
-- `/kaizen:analyze` v0.8 — additional modes: `--dependencies` (npm outdated/audit), `--security`, `--complexity`.
-- `/kaizen:preflight` v0.8 — `--base=<ref>`, `--skip=<checks>`, `--auto-fix` flags; risk-aware sizing; commit style auto-detection from history.
-- `/kaizen:plan` v0.8 — inline prompt input (`--from-prompt`); gh issue input (`--from-issue`); auto-conversion of PDF/DOCX if `pdftotext`/`pandoc` installed; `--seed-todos` to push to TodoWrite.
+- `/kaizen:learn` v0.9 — `--include-session` flag (analyze current Claude Code session conversation — needs careful design around accessing the transcript).
+- `/kaizen:analyze` v0.9 — additional modes: `--dependencies` (npm outdated/audit), `--security`, `--complexity`.
+- `/kaizen:preflight` v0.9 — risk-aware sizing (lighter security review for small diffs); commit style auto-detection from history.
+- `/kaizen:plan` v0.9 — inline prompt input (`--from-prompt`); gh issue input (`--from-issue`); auto-conversion of PDF/DOCX if `pdftotext`/`pandoc` installed; `--seed-todos` to push to TodoWrite.
+
+---
+
+## [0.8.0] — 2026-05-19
+
+### Added — `/kaizen:preflight` flag suite
+
+Three new flags, all opt-in, all combinable (e.g., `/kaizen:preflight --base=develop --skip=security --auto-fix`):
+
+- **`--base=<ref>`** — Override the auto-detected base ref. Examples: `--base=develop` (git-flow projects), `--base=v1.0.0` (release-branch comparisons), `--base=HEAD~3`. When the user names a ref explicitly, kaizen does NOT silently fall back if it's invalid — it stops with a clear error.
+
+- **`--skip=<checks>`** — Skip specific checks. CSV of: `tests`, `typecheck`, `lint`, `security`, `commit`. Example: `--skip=security,commit` runs only the deterministic trio (useful for quick iterative gates). Skipped checks appear in the report and never affect the verdict.
+
+- **`--auto-fix`** — **Modifies source files**. Before running lint, attempts safe auto-fixes per stack: `eslint --fix` + `prettier --write` (JS/TS), `ruff check --fix` + `ruff format` (Python), `gofmt -w` (Go), `cargo fmt` (Rust). Opt-in only, never default. Warns if git tree is dirty (auto-fixes will mix with WIP). Lint then reports only what auto-fix couldn't resolve. Files modified are listed in the report header.
+
+### Changed
+- The `## Hard rules` section of preflight's SKILL.md now reads "NEVER modify source code UNLESS `--auto-fix` was passed" — the read-only contract is now conditionally relaxed only when the user explicitly opts in.
+- The report header gained two new lines: `Flags: <list>` and (when `--auto-fix` was used) `Auto-fix applied: <N files>`.
+- Failure modes expanded: invalid `--base` stops with error (no silent fallback); unknown `--skip=<x>` target is warned and ignored; `--skip` excluding all checks is rejected.
+
+### Notes
+- Pure additive. Without any of the new flags, v0.8.0 behaves exactly like v0.7.0/v0.5.0 — no breaking changes.
+- Risk-aware sizing and commit-style auto-detection (also planned for /preflight) remain deferred to v0.9. Both need more design work to avoid false negatives or misdetection.
 
 ---
 

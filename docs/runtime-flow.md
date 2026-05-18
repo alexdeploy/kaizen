@@ -1120,6 +1120,9 @@ User on `feat/xyz` branch, but hasn't committed anything new since branching fro
 |---|---|
 | `/kaizen:preflight` | Yes for the same git state. Re-running on unchanged repo gives same verdict and similar agent outputs. |
 | `/kaizen:preflight show` | Yes — pure read. |
+| `/kaizen:preflight --base=<X>` | Yes for the same X. v0.8+. |
+| `/kaizen:preflight --skip=<list>` | Yes for the same list. v0.8+. Skipped checks always show as `skipped (--skip)`. |
+| `/kaizen:preflight --auto-fix` | **No** — modifies source files. After the first run, the second run starts from the auto-fixed state. v0.8+. |
 
 Re-runs are encouraged — after fixing issues, run again to confirm SHIP. Cheap and stateless.
 
