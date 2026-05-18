@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(pytest *)",
+      "Bash(ruff *)",
+      "Bash(mypy *)",
+      "Bash(pyright *)",
+      "Bash({{PACKAGE_MANAGER}} run *)",
+      "Bash({{PACKAGE_MANAGER}} sync)",
+      "Bash(python *)",
+      "Bash(python3 *)",
+      "Bash(git status)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git branch *)",
+      "Read(./**)"
+    ],
+    "deny": [
+      "Bash(rm -rf *)",
+      "Bash(sudo *)",
+      "Bash(pip install *)",
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(./secrets/**)"
+    ],
+    "ask": [
+      "Bash(git push *)",
+      "Bash({{PACKAGE_MANAGER}} add *)"
+    ],
+    "defaultMode": "default"
+  },
+  "includeCoAuthoredBy": true,
+  "autoMemoryEnabled": true,
+  "cleanupPeriodDays": 30,
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/session-start.sh"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/format-on-save.sh"
+          }
+        ]
+      }
+    ]
+  }
+}

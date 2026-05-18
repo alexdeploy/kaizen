@@ -1,0 +1,12 @@
+{
+  "name": "kaizen",
+  "description": "Bootstrap and continuous improvement for Claude Code projects: scaffolds .claude/, adapts to existing repos, evolves config as the project grows",
+  "version": "0.3.0",
+  "author": {
+    "name": "Alex Rueda",
+    "email": "alexruedadev@gmail.com"
+  },
+  "homepage": "https://github.com/alexruedadev/kaizen",
+  "license": "MIT",
+  "keywords": ["claude-code", "bootstrap", "scaffold", "auto-learning"]
+}

@@ -1,0 +1,149 @@
+#!/usr/bin/env bash
+# kaizen :: detect.sh
+# Huella deterministica del proyecto. Output: JSON a stdout.
+# Lo consume init/SKILL.md vía bash injection — barato, sin tokens del modelo.
+
+set -euo pipefail
+
+cd "${CLAUDE_PROJECT_DIR:-.}"
+
+# Helpers
+exists() { [ -e "$1" ]; }
+count_files() { find . -maxdepth 5 -type f -name "$1" -not -path './node_modules/*' -not -path './.git/*' -not -path './dist/*' -not -path './build/*' -not -path './.venv/*' -not -path './venv/*' 2>/dev/null | wc -l | tr -d ' '; }
+has_dir() { [ -d "$1" ] && echo true || echo false; }
+
+# Stack detection
+detect_stack() {
+  local stacks=()
+  exists package.json && {
+    if grep -qE '"(react|next|vue|svelte|astro|remix)"' package.json 2>/dev/null; then
+      stacks+=("frontend")
+    fi
+    if grep -qE '"(express|fastify|hono|nestjs|koa)"' package.json 2>/dev/null; then
+      stacks+=("backend-node")
+    fi
+    if grep -qE '"typescript"' package.json 2>/dev/null; then
+      stacks+=("typescript")
+    else
+      stacks+=("javascript")
+    fi
+  }
+  exists pyproject.toml || exists requirements.txt || exists setup.py && stacks+=("python")
+  exists go.mod && stacks+=("go")
+  exists Cargo.toml && stacks+=("rust")
+  exists pom.xml || exists build.gradle && stacks+=("java")
+  exists Gemfile && stacks+=("ruby")
+  exists composer.json && stacks+=("php")
+  exists mix.exs && stacks+=("elixir")
+
+  if [ ${#stacks[@]} -eq 0 ]; then
+    echo "generic"
+  else
+    printf '%s\n' "${stacks[@]}" | sort -u | tr '\n' ',' | sed 's/,$//'
+  fi
+}
+
+# Package manager
+detect_pm() {
+  exists pnpm-lock.yaml && { echo "pnpm"; return; }
+  exists yarn.lock && { echo "yarn"; return; }
+  exists bun.lockb && { echo "bun"; return; }
+  exists package-lock.json && { echo "npm"; return; }
+  exists uv.lock && { echo "uv"; return; }
+  exists poetry.lock && { echo "poetry"; return; }
+  exists Pipfile.lock && { echo "pipenv"; return; }
+  exists pyproject.toml && { echo "pip"; return; }
+  echo "none"
+}
+
+# Maturity heuristic: empty / scaffold / small / mature
+detect_maturity() {
+  local src_files
+  src_files=$(find . -maxdepth 6 -type f \
+    \( -name '*.ts' -o -name '*.tsx' -o -name '*.js' -o -name '*.jsx' \
+    -o -name '*.py' -o -name '*.go' -o -name '*.rs' -o -name '*.java' \
+    -o -name '*.rb' -o -name '*.php' -o -name '*.ex' -o -name '*.exs' \) \
+    -not -path './node_modules/*' -not -path './.git/*' -not -path './dist/*' \
+    -not -path './build/*' -not -path './.venv/*' -not -path './venv/*' \
+    -not -path './target/*' -not -path './vendor/*' 2>/dev/null | wc -l | tr -d ' ')
+
+  if [ "$src_files" -eq 0 ]; then echo "empty"
+  elif [ "$src_files" -le 5 ]; then echo "scaffold"
+  elif [ "$src_files" -le 50 ]; then echo "small"
+  else echo "mature"
+  fi
+}
+
+# Git state
+git_state() {
+  if ! git rev-parse --git-dir >/dev/null 2>&1; then
+    echo "false|0|none"
+    return
+  fi
+  local commits branch
+  commits=$(git rev-list --count HEAD 2>/dev/null || echo 0)
+  branch=$(git branch --show-current 2>/dev/null || echo "none")
+  echo "true|${commits}|${branch}"
+}
+
+# Existing claude config?
+detect_claude_config() {
+  local items=()
+  exists CLAUDE.md && items+=("CLAUDE.md")
+  exists .claude/settings.json && items+=("settings.json")
+  has_dir .claude/skills 2>/dev/null | grep -q true && items+=("skills/")
+  has_dir .claude/agents 2>/dev/null | grep -q true && items+=("agents/")
+  has_dir .claude/hooks 2>/dev/null | grep -q true && items+=("hooks/")
+  has_dir .claude/rules 2>/dev/null | grep -q true && items+=("rules/")
+  exists .mcp.json && items+=(".mcp.json")
+
+  if [ ${#items[@]} -eq 0 ]; then
+    echo ""
+  else
+    printf '%s\n' "${items[@]}" | tr '\n' ',' | sed 's/,$//'
+  fi
+}
+
+# Has tests?
+detect_tests() {
+  local count
+  count=$(find . -maxdepth 6 -type f \
+    \( -name '*.test.*' -o -name '*.spec.*' -o -name 'test_*.py' -o -name '*_test.go' \) \
+    -not -path './node_modules/*' -not -path './.git/*' 2>/dev/null | wc -l | tr -d ' ')
+  echo "$count"
+}
+
+# Has CI?
+detect_ci() {
+  exists .github/workflows && echo "github-actions" && return
+  exists .gitlab-ci.yml && echo "gitlab" && return
+  exists .circleci/config.yml && echo "circleci" && return
+  exists Jenkinsfile && echo "jenkins" && return
+  echo "none"
+}
+
+# Compose JSON output
+STACK=$(detect_stack)
+PM=$(detect_pm)
+MATURITY=$(detect_maturity)
+IFS='|' read -r GIT_EXISTS GIT_COMMITS GIT_BRANCH < <(git_state)
+CLAUDE_CFG=$(detect_claude_config)
+TEST_COUNT=$(detect_tests)
+CI=$(detect_ci)
+
+cat <<JSON
+{
+  "stack": "${STACK}",
+  "package_manager": "${PM}",
+  "maturity": "${MATURITY}",
+  "git": {
+    "is_repo": ${GIT_EXISTS},
+    "commits": ${GIT_COMMITS},
+    "branch": "${GIT_BRANCH}"
+  },
+  "existing_claude_config": "${CLAUDE_CFG}",
+  "tests_found": ${TEST_COUNT},
+  "ci": "${CI}",
+  "cwd": "${PWD}"
+}
+JSON

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "kaizen",
+  "owner": {
+    "name": "Alex Rueda",
+    "email": "alexruedadev@gmail.com"
+  },
+  "plugins": [
+    {
+      "name": "kaizen",
+      "source": "./plugins/kaizen",
+      "description": "Bootstrap and continuous improvement for Claude Code projects: scaffolds .claude/, adapts to existing repos, evolves config as the project grows",
+      "version": "0.3.0",
+      "keywords": ["bootstrap", "scaffold", "auto-learning", "best-practices"]
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+
+# kaizen :: Claude Code local config (NO commit)
+.claude/settings.local.json
+.claude/agent-memory-local/

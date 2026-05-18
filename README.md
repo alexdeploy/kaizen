@@ -1,0 +1,90 @@
+# kaizen — bootstrap and continuous improvement for Claude Code
+
+> 改善 (kaizen) = continuous improvement.
+> A Claude Code plugin that scaffolds a complete, adapted `.claude/` setup for any project — empty or existing — and (in future versions) evolves it as the project grows.
+
+## What it does today (v0.3.0)
+
+- `/kaizen:init` — analyzes your project (stack, maturity, git state, existing config) and generates a tailored `CLAUDE.md`, `.claude/settings.json`, path-scoped rules, a code-reviewer agent, and hooks. Works on **empty and existing** projects. Outputs a per-file drift report so you know exactly what was customized.
+- `/kaizen:learn` — analyzes recent git activity and proposes updates to `CLAUDE.md` / `.claude/rules/`. Writes proposals to `.claude/kaizen/pending.md` for you to review. Subcommands: `show`, `apply`, `discard`. **Never modifies your config without explicit approval.**
+
+## What's coming next
+
+- `/kaizen:analyze` — deep audit (best-practices, dependencies, upgrades).
+- `/kaizen:plan` — turn a spec doc into a structured task tree.
+- `/kaizen:preflight` — pre-PR chain (test → typecheck → lint → security → commit msg).
+
+## Repo layout
+
+```
+kaizen/
+├── .claude-plugin/
+│   └── marketplace.json          ← marketplace manifest (this repo IS the marketplace)
+└── plugins/
+    └── kaizen/                   ← the plugin itself
+        ├── .claude-plugin/
+        │   └── plugin.json
+        ├── bin/
+        │   └── kaizen-detect     ← auto-added to PATH when plugin is enabled
+        └── skills/
+            ├── init/
+            │   ├── SKILL.md                  ← /kaizen:init entrypoint
+            │   └── templates/                ← what /init writes into user projects
+            │       ├── _shared/              ← stack-agnostic files
+            │       ├── generic/
+            │       ├── typescript-node/
+            │       └── python/
+            └── learn/
+                └── SKILL.md                  ← /kaizen:learn entrypoint (analyze/show/apply/discard)
+```
+
+## Local development
+
+No need to publish. Load the plugin straight from this directory:
+
+```bash
+cd /path/to/your/project
+claude --plugin-dir /Users/alex/Development/projects/kaizen/plugins/kaizen
+```
+
+Then in Claude Code:
+
+```
+/kaizen:init
+```
+
+After making changes to the plugin source, restart Claude Code to pick up the new version. (Some Claude Code versions expose `/reload-plugins` for hot reload; v2.1.45 does not — the install message will tell you when restart is required.)
+
+## Smoke test
+
+```bash
+# In any project directory:
+/Users/alex/Development/projects/kaizen/plugins/kaizen/bin/kaizen-detect
+```
+
+You should see a JSON payload with `stack`, `package_manager`, `maturity`, `git`, `existing_claude_config`, `tests_found`, `ci`.
+
+## Publishing (when ready)
+
+1. `git init && git add . && git commit -m "v0.1.0 - init skill"`.
+2. Push to GitHub: `git remote add origin git@github.com:alexruedadev/kaizen.git && git push -u origin main`.
+3. Users add the marketplace once:
+   ```
+   /plugin marketplace add alexruedadev/kaizen
+   /plugin install kaizen@kaizen
+   ```
+   Then restart Claude Code so the new skills/agents are loaded.
+4. Future releases: bump `version` in **both** `plugins/kaizen/.claude-plugin/plugin.json` **and** `.claude-plugin/marketplace.json`, then push. Users update with `/plugin marketplace update kaizen` and restart Claude Code.
+
+## Design principles
+
+1. **Never silently overwrite.** If config exists, ask before touching it. `--force` is opt-in.
+2. **Deterministic detection, LLM reasoning.** Bash scripts gather facts (fast, free); the model interprets and adapts.
+3. **Adapt to maturity.** Empty repo → ask. Small repo → minimal scaffolding. Mature repo → offer archeology mode.
+4. **English internally.** All config templates are in English (loads every session → cache-friendly). User-facing output adapts to user's language.
+5. **Start small, grow on signal.** v0 generates the bare-essential scaffolding. Future skills (`/kaizen:learn`) add complexity only when the project earns it.
+
+## Versioning
+
+- v0 → v0.x: breaking changes likely. Anchor `version` in `plugin.json` so users opt into updates.
+- v1.x+: semver. Breaking changes only on majors.
