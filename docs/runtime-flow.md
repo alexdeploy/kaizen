@@ -2,12 +2,15 @@
 
 > Decision trees, action sequences, and worked scenarios. Mermaid diagrams render in GitHub, VS Code (Markdown Preview Mermaid Support), and most modern markdown viewers.
 
-**Covers five skills (v0.6.0 — the v0 skill set is complete):**
-- **`/kaizen:init`** — sections 1–9 below.
+**Covers eight skills (v0.10.0 — the advanced workflow scaffold release):**
+- **`/kaizen:init`** — sections 1–9 below (plus profile system in section 17).
 - **`/kaizen:learn`** — section 10.
 - **`/kaizen:analyze`** — section 11.
 - **`/kaizen:preflight`** — section 12.
-- **`/kaizen:plan`** — section 13 onward.
+- **`/kaizen:plan`** — section 13.
+- **`/kaizen:docs`** — section 14 (v0.10+).
+- **`/kaizen:bump`** — section 15 (v0.10+).
+- **`/kaizen:finish`** — section 16 (v0.10+, the 4-agent orchestrator).
 
 For static structure see [architecture.md](./architecture.md). For end-user instructions see [user-manual.md](./user-manual.md).
 
@@ -1435,3 +1438,235 @@ Approximate breakdown:
 | Output style | Per-file write | Proposal+apply | Snapshot | Snapshot with verdict | Versioned artifact |
 | Re-run behavior | Refuses (without `--force`) | State-machine guarded | Overwrites snapshot | Overwrites snapshot | Adds new file |
 | Verdict-style output | Drift report | Proposals | Findings | SHIP/HOLD/BLOCK | Annotated task tree |
+
+---
+
+# 14. `/kaizen:docs` runtime
+
+## 14.1 Sequence
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User
+    participant Claude as Claude Code
+    participant Skill as docs/SKILL.md
+    participant Git as git (Bash)
+    participant Agent as docs-keeper<br/>(Task subagent)
+    participant Report as docs-report.md
+
+    User->>Claude: /kaizen:docs
+    Claude->>Skill: load SKILL.md
+    Claude->>Git: resolve base ref + git diff --name-only
+    alt no changes
+        Claude->>User: ✓ Nothing to analyze. STOP
+    end
+    Claude->>Agent: Task(docs-keeper, changed files)
+    Agent-->>Claude: findings (or "No documentation updates needed.")
+    Claude->>Report: write docs-report.md
+    Claude->>User: console summary + path to report
+```
+
+Single agent — no parallel dispatch. The skill is a thin wrapper around `docs-keeper`.
+
+## 14.2 What gets analyzed
+
+```mermaid
+flowchart TD
+    Diff[git diff --name-only base..HEAD] --> Filter[Filter to source files]
+    Filter --> Agent[docs-keeper agent receives the list]
+    Agent --> CheckEach{For each changed source file}
+    CheckEach --> Cat1[Public API surface?]
+    CheckEach --> Cat2[CLI flags/commands?]
+    CheckEach --> Cat3[Config schema?]
+    CheckEach --> Cat4[Behavioral changes?]
+    CheckEach --> Cat5[Stale examples?]
+    CheckEach --> Cat6[Architecture changes?]
+    Cat1 --> Match[Grep doc files for affected terms]
+    Cat2 --> Match
+    Cat3 --> Match
+    Cat4 --> Match
+    Cat5 --> Match
+    Cat6 --> Match
+    Match --> Severity{Severity tier?}
+    Severity --> Output[Report finding with severity + evidence]
+```
+
+Severity tiers: `high` (doc now incorrect), `medium` (new surface area not yet documented), `low` (internal change touches documented architecture).
+
+---
+
+# 15. `/kaizen:bump` runtime
+
+## 15.1 Sequence
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User
+    participant Claude as Claude Code
+    participant Skill as bump/SKILL.md
+    participant Files as project files
+    participant Git as git (Bash)
+    participant Agent as versioner<br/>(Task subagent)
+    participant Report as bump-report.md
+
+    User->>Claude: /kaizen:bump
+    Claude->>Skill: load SKILL.md
+    Claude->>Files: detect version manifest (package.json / pyproject.toml / Cargo.toml)
+    Claude->>Files: detect .changeset/config.json (changeset mode?)
+    alt no supported manifest
+        Claude->>User: ✗ no supported manifest. STOP
+    end
+    Claude->>Git: detect base ref (most recent tag, else HEAD~10)
+    Claude->>Git: git log + diff --stat for range
+    Claude->>Agent: Task(versioner, range + manifest + changeset hint)
+    Agent-->>Claude: bump type + justification + draft changeset (if applicable)
+    Claude->>Report: write bump-report.md (with apply guidance)
+    Claude->>User: console summary
+```
+
+## 15.2 Semver classification
+
+```mermaid
+flowchart TD
+    Start[Read commits in range] --> ForEach{For each commit}
+    ForEach --> Body[Read full body via git log --format=%B]
+    Body --> Breaking{BREAKING CHANGE: in body<br/>OR feat!: / fix!: suffix?}
+    Breaking -->|yes| MarkMajor[mark major]
+    Breaking -->|no| Type{Conventional type?}
+    Type -->|feat| MarkMinor[mark minor]
+    Type -->|fix/refactor/perf/docs/test/chore/style/build/ci| MarkPatch[mark patch]
+    Type -->|plain text| Infer[Infer from diff: new exports = feat;<br/>removed exports = breaking]
+    Infer --> MarkInferred[mark accordingly]
+
+    MarkMajor --> Aggregate
+    MarkMinor --> Aggregate
+    MarkPatch --> Aggregate
+    MarkInferred --> Aggregate
+
+    Aggregate{Highest applicable<br/>across all commits} --> Major{any major?}
+    Major -->|yes| RecMajor[recommend major]
+    Major -->|no| Minor{any minor?}
+    Minor -->|yes| RecMinor[recommend minor]
+    Minor -->|no| RecPatch[recommend patch]
+```
+
+---
+
+# 16. `/kaizen:finish` runtime
+
+## 16.1 Top-level sequence — the 4-agent parallel orchestrator
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User
+    participant Claude as Claude Code
+    participant Skill as finish/SKILL.md
+    participant Git as git + Bash
+    participant Agents as 4 parallel agents<br/>(single Task message)
+    participant Report as finish-report.md
+
+    User->>Claude: /kaizen:finish
+    Claude->>Skill: load SKILL.md
+
+    Note over Claude: Phase 1: setup
+    Claude->>Git: base ref + changed files + stack + manifest detection
+    alt no changes
+        Claude->>User: ✓ Nothing to finish. STOP
+    end
+
+    Note over Claude: Phase 2: optional --auto-fix
+    opt --auto-fix
+        Claude->>Git: run formatters/linters
+    end
+
+    Note over Claude: Phase 3: deterministic checks (sequential)
+    Claude->>Git: tests → typecheck → lint
+    Git-->>Claude: results (pass/fail/skip)
+
+    Note over Claude,Agents: Phase 4: PARALLEL — 4 Task calls in 1 message
+    par Security
+        Claude->>Agents: Task(preflight-security)
+    and Commit msg
+        Claude->>Agents: Task(commit-suggester)
+    and Version bump
+        Claude->>Agents: Task(versioner)
+    and Docs gap
+        Claude->>Agents: Task(docs-keeper)
+    end
+    Agents-->>Claude: 4 results aggregated
+
+    Note over Claude: Phase 5: compute verdict
+    Claude->>Claude: SHIP / HOLD / BLOCK<br/>(bump + docs advisory only)
+
+    Note over Claude: Phase 6: write report + summary
+    Claude->>Report: write finish-report.md
+    Claude->>User: console banner + verdict + checklist
+```
+
+The `par` block is the key new pattern: **4 Task calls in 1 message** = 4 subagents running simultaneously. Generalization of `/preflight`'s 2-agent and `/plan`'s 2-agent patterns.
+
+## 16.2 Verdict computation (advisory vs gating)
+
+```mermaid
+flowchart TD
+    Start[All agent + check results] --> CritSec{Critical security?}
+    CritSec -->|yes| Block1[BLOCK]
+    CritSec -->|no| TestsFail{Tests failed?}
+    TestsFail -->|yes| Block2[BLOCK]
+    TestsFail -->|no| TypeFail{Typecheck failed?}
+    TypeFail -->|yes| Block3[BLOCK]
+    TypeFail -->|no| LintErr{Lint errors?}
+    LintErr -->|yes| Hold1[HOLD]
+    LintErr -->|no| HighSec{High security?}
+    HighSec -->|yes| Hold2[HOLD]
+    HighSec -->|no| HighDocs{High docs finding?}
+    HighDocs -->|yes| Hold3[HOLD]
+    HighDocs -->|no| Ship[SHIP]
+
+    BumpAdv[Bump recommendation:<br/>advisory only]:::adv
+    BumpAdv -.never gates.-> Ship
+    DocsAdv[Docs medium/low findings:<br/>advisory only]:::adv
+    DocsAdv -.never gates.-> Ship
+
+    classDef stop fill:#fecaca,stroke:#dc2626;
+    classDef warn fill:#fef3c7,stroke:#ca8a04;
+    classDef ok fill:#dcfce7,stroke:#16a34a;
+    classDef adv fill:#dbeafe,stroke:#2563eb;
+    class Block1,Block2,Block3 stop;
+    class Hold1,Hold2,Hold3 warn;
+    class Ship ok;
+```
+
+## 16.3 Cross-skill comparison
+
+| Aspect | `/preflight` (v0.5) | `/plan` (v0.6) | `/finish` (v0.10) |
+|---|---|---|---|
+| Agents spawned | 2 (parallel) | 2 (parallel) | **4 (parallel)** |
+| Deterministic phase | Yes (tests/typecheck/lint) | Yes (setup signals) | Yes (tests/typecheck/lint) |
+| LLM agents in 1 message | 2 Task calls | 2 Task calls | **4 Task calls** |
+| Mutation flag | `--auto-fix` (opt-in) | None | `--auto-fix` (opt-in) |
+| Output | Single overwritten report | Versioned plan files | Single overwritten report |
+| Verdict | SHIP/HOLD/BLOCK | (no verdict; annotated plan) | SHIP/HOLD/BLOCK + advisory bump/docs |
+
+---
+
+# 17. `/kaizen:init` profile system
+
+The `--profile=<level>` flag (v0.10+) determines which workflow scaffolding gets included:
+
+```mermaid
+flowchart TD
+    Start([/kaizen:init args]) --> Profile{--profile?}
+    Profile -->|minimal OR --minimal flag| Min[Base only:<br/>CLAUDE.md, settings,<br/>1 rule, code-reviewer,<br/>2 hooks]
+    Profile -->|standard or default| Std[Base + workflow.md rule<br/>+ Workflow section in CLAUDE.md]
+    Profile -->|advanced| Adv[Standard + workflow-advanced.md<br/>+ End-of-task ritual section<br/>+ stack-specific Versioning section]
+
+    Min --> Done([DONE])
+    Std --> Done
+    Adv --> Done
+```
+
+The plugin's skills (`/docs`, `/bump`, `/finish`, etc.) are always available regardless of profile — the profile only controls whether the project's CLAUDE.md surfaces them as the recommended workflow. A `minimal`-profile project user can still invoke `/kaizen:finish`; they just won't be prompted to.

@@ -2,18 +2,23 @@
 
 > How the plugin works once it's installed and a user invokes a command. This document is about runtime behavior, not about how to develop kaizen itself.
 
-**This document covers five skills + four plugin-level agents (v0.6.0 — the v0 skill set is complete):**
-- `/kaizen:init` — bootstrap a project's Claude Code config. Sections 1-8.
+**This document covers eight skills + six plugin-level agents (v0.10.0 — the advanced workflow scaffold release):**
+- `/kaizen:init` — bootstrap a project's Claude Code config (with profile system v0.10+). Sections 1-8.
 - `/kaizen:learn` — propose updates to that config based on git activity. Section 9.
 - `/kaizen:analyze` — read-only audit of code against the config. Section 11.
 - `/kaizen:preflight` — pre-merge gate (deterministic checks + parallel LLM agents). Section 12.
 - `/kaizen:plan` — auto-planner (spec doc → annotated task tree). Section 13.
+- `/kaizen:docs` — documentation gap analyzer (v0.10+). Section 14.
+- `/kaizen:bump` — semver bump suggester (v0.10+). Section 15.
+- `/kaizen:finish` — end-of-task orchestrator (v0.10+). Section 16.
 
 Plus the agents shipped by the plugin:
-- `preflight-security`, `commit-suggester` — invoked by `/preflight`.
-- `plan-context`, `plan-decomposer` — invoked by `/plan`.
+- `preflight-security`, `commit-suggester` — used by `/preflight` + `/finish`.
+- `plan-context`, `plan-decomposer` — used by `/plan`.
+- `docs-keeper` — used by `/docs` + `/finish`.
+- `versioner` — used by `/bump` + `/finish`.
 
-All five skills share the same plugin tree and runtime model. They differ in what they read, what they write, and the directives that govern each. `/init` and `/learn` can mutate config (`/init` generates, `/learn` applies user-approved proposals); `/analyze`, `/preflight`, and `/plan` are strictly read-only (only the artifact file is written).
+All eight skills share the same plugin tree and runtime model. They differ in what they read, what they write, and the directives that govern each. `/init` and `/learn` can mutate config; the rest are strictly read-only (only the artifact file is written, with `--auto-fix` as the single opt-in escape for `/preflight` and `/finish`).
 
 ## Mental model
 
@@ -1087,3 +1092,137 @@ Exactly one must be specified — multiple is an error. The plan filename slug d
 With `--seed-todos`, after writing the plan file, the skill calls TodoWrite to push each plan task as a `pending` entry. This bridges the plan-as-artifact (persistent) with TodoWrite (session-scoped execution tracking).
 
 **Important distinction**: plans are the durable artifact; TodoWrite is the in-session tracker. The user must explicitly opt in with `--seed-todos` because TodoWrite entries don't survive session ends — they're meant for active work, not project memory.
+
+---
+
+# 14. `/kaizen:docs` runtime (v0.10.0+)
+
+> Mirror skill to `/learn`: where `/learn` updates internal config (CLAUDE.md/rules), `/docs` surfaces **user-facing documentation gaps**. Read-only.
+
+## Components
+
+| Component | Purpose |
+|---|---|
+| `skills/docs/SKILL.md` | Single-agent orchestrator: resolve range → spawn docs-keeper → write report |
+| `agents/docs-keeper.md` | Read-only doc gap analyzer. Inputs: changed source files. Outputs: severity-tagged findings or `"No documentation updates needed."` sentinel |
+| `.claude/kaizen/docs-report.md` | Overwritten each run |
+
+## Pattern
+
+Single-agent (not multi-agent like `/preflight`, `/plan`, `/finish`) because there's only one job: audit docs against code changes. Adding a second parallel agent would be artificial parallelism.
+
+## Boundaries
+
+Reads: source diff, all `README.md` / `docs/` / `documentation/` markdown files at project root, `CHANGELOG.md` (mention only — never edits).
+Writes: `.claude/kaizen/docs-report.md` and (one-time) `.gitignore`.
+Never touches: any documentation file content, source code, version manifests.
+
+---
+
+# 15. `/kaizen:bump` runtime (v0.10.0+)
+
+> Suggests a semver bump (major/minor/patch) with per-commit justification. Detects changesets. Read-only in v0.10.
+
+## Components
+
+| Component | Purpose |
+|---|---|
+| `skills/bump/SKILL.md` | Single-agent orchestrator: detect manifest + changeset config → resolve range → spawn versioner → write report |
+| `agents/versioner.md` | Read-only semver analyst. Inputs: diff range + manifest path + changeset hint. Outputs: bump type + draft changeset content (if applicable) |
+| `.claude/kaizen/bump-report.md` | Overwritten each run |
+
+## Manifest support in v0.10
+
+| File | Stack | Version field |
+|---|---|---|
+| `package.json` | JS/TS | `.version` |
+| `pyproject.toml` | Python | `project.version` (PEP 621) OR `tool.poetry.version` |
+| `Cargo.toml` | Rust | `package.version` |
+
+Other formats surface as "manual bump required" — no incorrect auto-detection.
+
+## Read-only contract in v0.10
+
+`--apply` (auto-modify manifest / write changeset) is **deferred to v0.11**. v0.10 outputs a recommendation + draft changeset content for the user to paste. This preserves the read-only default and gives users time to inspect the suggestion before committing to it.
+
+## Boundaries
+
+Reads: git log + diff range, version manifest, `.changeset/config.json` (existence check), git tags (for auto-detecting "since last release").
+Writes: `.claude/kaizen/bump-report.md` and (one-time) `.gitignore`.
+Never touches: version manifest, changeset files, source code.
+
+---
+
+# 16. `/kaizen:finish` runtime (v0.10.0+)
+
+> The end-of-task orchestrator. First skill to spawn **4 agents in parallel** in a single message.
+
+## Mental model — scales the multi-agent pattern
+
+```
+        Skill                      Phase 2: parallel agents (single message, 4 Task calls)
+   ┌───────────────┐               ┌─────────────────────────────────────────┐
+   │  /finish      │               │                                         │
+   │  orchestrator │  ───────────▶ │   preflight-security                    │
+   └───────────────┘               │   commit-suggester                      │
+                                   │   versioner                             │
+                                   │   docs-keeper                           │
+                                   │                                         │
+                                   │   (all run simultaneously, ~4× speedup) │
+                                   └─────────────────────────────────────────┘
+```
+
+Where `/preflight` (v0.5) spawned 2 agents and `/plan` (v0.6) spawned 2, `/finish` scales to 4. This validates the parallel-Task pattern at larger fan-out — token cost is similar to running them sequentially; wall-clock is ~4× faster.
+
+## Components
+
+| Component | Purpose |
+|---|---|
+| `skills/finish/SKILL.md` | 6-phase orchestrator |
+| Reuses 4 existing plugin agents | No new agents — `/finish` reuses what `/preflight`, `/bump`, `/docs` already use |
+| `.claude/kaizen/finish-report.md` | Overwritten each run |
+
+## Six phases
+
+1. **Setup** — base ref + changed files + stack + manifest detection (combines `/preflight` + `/bump` detection logic).
+2. **Optional auto-fix** (only if `--auto-fix`) — same as `/preflight` Step 3.5.
+3. **Deterministic checks** (sequential, Bash) — tests / typecheck / lint, same as `/preflight`. Respects `--skip`.
+4. **Parallel agents** (single message, up to 4 Task calls) — security + commit + version + docs.
+5. **Verdict** — SHIP / HOLD / BLOCK. Bump and docs findings are **advisory** (don't gate).
+6. **Report + console summary** — unified report with per-concern guidance + an end-of-task checklist.
+
+## Verdict rules (advisory vs gating)
+
+| Verdict | Triggers |
+|---|---|
+| `BLOCK` | tests failed OR typecheck failed OR critical security finding |
+| `HOLD` | lint errors OR high security finding OR high docs finding |
+| `SHIP` | everything else |
+
+**Critical insight**: bump and docs findings are advisory only — they appear in the report but never trigger BLOCK or HOLD. Reason: docs/bump being "missing" is a judgment call (sometimes you DON'T want to update docs in the same commit; sometimes a "feat" is small enough to not bump). Letting the user decide keeps the gate clean.
+
+## Why this design (vs. shelling out to /preflight, /bump, /docs)
+
+- **Single context** — one skill invocation, one report, easier to scan.
+- **Reuses agents, not skills** — DRY at the agent level. The orchestration logic is rewritten in /finish but the agents are shared.
+- **Genuinely parallel** — 4 agents in 1 message ≈ 4× wall-clock speedup vs. running 3 skills sequentially (each with its own setup overhead).
+
+## Boundaries
+
+Same as the union of `/preflight` + `/bump` + `/docs` boundaries. Writes only `.claude/kaizen/finish-report.md` and (one-time) `.gitignore`. The only mutation path is `--auto-fix` (which delegates to configured formatters/linters).
+
+---
+
+# 17. Profile system in `/kaizen:init` (v0.10.0+)
+
+`/init` gained a `--profile=<minimal|standard|advanced>` flag (default `standard`). The profile controls how much **workflow scaffolding** kaizen includes:
+
+| Profile | Base scaffold | Workflow extras |
+|---|---|---|
+| `minimal` | CLAUDE.md, settings, 1 rule, code-reviewer agent, 2 hooks | None — identical to v0.6 output |
+| `standard` (default) | Base + `.claude/rules/workflow.md` + "Workflow" section in CLAUDE.md | Documents the 8 kaizen skills |
+| `advanced` | Standard + `.claude/rules/workflow-advanced.md` + stack-specific Versioning section in CLAUDE.md | Recommends `/kaizen:finish` as end-of-task ritual |
+
+**Crucial**: the plugin's skills and agents are **always available** when kaizen is installed — the profile only controls whether the project's CLAUDE.md and rules **document** them. A minimal-profile project can still invoke `/kaizen:finish` — the user just won't be reminded to.
+
+The profile is **additive** with no breaking change: existing v0.6-generated configs (effectively `minimal`) continue to work unchanged.

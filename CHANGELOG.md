@@ -10,11 +10,57 @@ While v0.x, **minor versions may include breaking changes**. From v1.0.0 onward,
 
 ## [Unreleased]
 
-### Planned (polish backlog continues; no new top-level skills)
-- `/kaizen:learn` v0.10 — `--include-session` flag (analyze current Claude Code session conversation — needs careful design on transcript access).
-- `/kaizen:analyze` v0.10 — additional modes: `--dependencies` (npm outdated/audit), `--security`, `--complexity`.
-- `/kaizen:preflight` v0.10 — risk-aware sizing; commit style auto-detection from history.
-- `/kaizen:plan` v0.10 — `--scope=<area>` (limit decomposition to a directory); `--depth=<shallow|medium|deep>`.
+### Planned (backlog tracked in BACKLOG.md)
+- `/kaizen:learn` — `--include-session` flag.
+- `/kaizen:analyze` — `--dependencies`, `--security`, `--complexity` modes.
+- `/kaizen:preflight` — risk-aware sizing; commit style auto-detection.
+- `/kaizen:bump` — `--apply` flag to actually modify manifests / write changesets.
+- `/kaizen:ci` skill (Phase 2 of the workflow initiative) — copy-on-demand CI/CD templates.
+- Phase 2 workflow skills — `branch-namer`, PR description generator, pre-push git hook integration.
+
+---
+
+## [0.10.0] — 2026-05-19
+
+### The "advanced workflow scaffold" release
+
+This release expands kaizen from "5 ad-hoc skills" to a **coordinated development workflow system**. New skills cover documentation gaps and version bumping. A new orchestrator (`/kaizen:finish`) chains the full end-of-task ritual. `/kaizen:init` gains a profile system so users can choose how much workflow scaffolding to include.
+
+### Added — 2 new plugin-level agents
+
+- **`docs-keeper`**: analyzes a git diff and surfaces which user-facing documentation files (README, docs/) may need updating. Read-only. Categories: public API surface, CLI flags, configuration schema, behavioral changes, stale examples. Bias toward conservative; emits `"No documentation updates needed."` sentinel when clean.
+- **`versioner`**: analyzes diff + commit messages + version manifest, suggests a semver bump (major/minor/patch) with per-commit justification. Detects changesets if `.changeset/` exists and produces draft changeset content. Supports `package.json` (JS/TS), `pyproject.toml` (Python, PEP 621 + Poetry), `Cargo.toml` (Rust).
+
+### Added — 3 new skills
+
+- **`/kaizen:docs`** — wraps `docs-keeper`. Auto-detects base ref (same logic as `/preflight`). Writes report to `.claude/kaizen/docs-report.md`. Subcommands: `show`. Flags: `--base`, `--since`, `--limit`.
+- **`/kaizen:bump`** — wraps `versioner`. Auto-detects most recent git tag as base (fallback `HEAD~10`). Writes report to `.claude/kaizen/bump-report.md`. Suggestion-only in v0.10 (no `--apply` yet — that's v0.11).
+- **`/kaizen:finish`** — end-of-task orchestrator. **First skill to spawn 4 agents in parallel** in a single message (`preflight-security` + `commit-suggester` + `versioner` + `docs-keeper`). Combines `/preflight`'s deterministic checks (tests/typecheck/lint) with all four LLM agents into a unified SHIP/HOLD/BLOCK verdict. Bump and docs findings are **advisory only** — they appear in the report but don't gate the verdict (the user calls those judgments).
+
+### Added — `/kaizen:init` profile system
+
+New flag `--profile=<minimal|standard|advanced>`:
+
+- `minimal` — identical to v0.6 output. No workflow scaffolding. Use for throwaway projects.
+- `standard` (default) — adds `.claude/rules/workflow.md` documenting all kaizen skills + workflow. Appends a "Workflow" section to `CLAUDE.md`. The new skills are **always available** when kaizen is installed; the profile only controls whether the project's CLAUDE.md surfaces them.
+- `advanced` — standard + `.claude/rules/workflow-advanced.md` with the end-of-task ritual (recommend `/kaizen:finish` before every commit) + a stack-specific Versioning section in CLAUDE.md (changesets-aware for JS/TS with `.changeset/`, direct manifest bump otherwise).
+
+Default is `standard` — new users get the workflow recommendations. `--profile=minimal` available for opt-out.
+
+### Architectural notes
+
+- **First 4-agent parallel dispatch**: `/finish` scales the parallel-Task pattern from 2 agents (`/preflight`, `/plan`) to 4. Validates the pattern at larger fan-out. Same single-message-multi-Task primitive.
+- **Skills coordinate, agents do the work**: `/finish` doesn't shell out to `/preflight`/`/bump`/`/docs` as sub-skills — it directly invokes the same plugin agents. Skills are coordination layers; agents are reusable units of work.
+- **Bump/docs are advisory, not gating**: keeping `BLOCK`/`HOLD` triggered only by security + deterministic checks. Doc/version judgments belong to the user.
+- **`/kaizen:init` profile system is additive**: existing users on `minimal` (= v0.6 default) get the same files; new users get the workflow recommendations.
+
+### Backlog moved to BACKLOG.md
+
+A new top-level `BACKLOG.md` tracks deferred polish items with design context, acceptance criteria, and estimated effort. Three items: `/learn` `--include-session`, `/analyze` v0.10 modes, `/preflight` risk-aware + commit style auto-detection.
+
+### Notes
+- Pure additive — without using new flags/skills, v0.10 behaves like v0.9 for the existing 5-skill workflow.
+- v0.11 will likely add: `/kaizen:bump --apply`, `/kaizen:ci` skill, branch-namer + PR generator (Phase 2 of the workflow initiative).
 
 ---
 

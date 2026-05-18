@@ -62,12 +62,15 @@ You'll see Claude run `detect.sh`, report what it found, and either generate fil
 
 ## Command reference
 
-Commands shipped in v0.9.0:
-- [`/kaizen:init`](#kaizeninit-arguments) — bootstrap project config
+Commands shipped in v0.10.0:
+- [`/kaizen:init`](#kaizeninit-arguments) — bootstrap project config (with `--profile` system)
 - [`/kaizen:learn`](#kaizenlearn-arguments) — propose config updates from git activity
 - [`/kaizen:analyze`](#kaizenanalyze-arguments) — read-only audit of code vs. stated rules
 - [`/kaizen:preflight`](#kaizenpreflight-arguments) — pre-merge gate (tests + LLM review + verdict)
 - [`/kaizen:plan`](#kaizenplan-arguments) — auto-planner: spec doc → annotated task tree
+- [`/kaizen:docs`](#kaizendocs-arguments) — documentation gap analyzer (v0.10+)
+- [`/kaizen:bump`](#kaizenbump-arguments) — semver bump suggester (v0.10+)
+- [`/kaizen:finish`](#kaizenfinish-arguments) — end-of-task orchestrator (v0.10+)
 
 ### `/kaizen:init [arguments]` {#kaizeninit-arguments}
 
@@ -77,12 +80,25 @@ Bootstrap a Claude Code configuration tailored to the current project. Detects s
 
 | Argument | Meaning |
 |---|---|
-| *(no args)* | Auto-detect everything. Recommended for first runs. |
-| `--preset <name>` | Skip auto-detection, use a named preset. Values: `generic`, `typescript-node`, `python`. |
+| *(no args)* | Auto-detect everything. Recommended for first runs. Uses `--profile=standard` by default. |
+| `--preset <name>` | Skip stack auto-detection, use a named preset. Values: `generic`, `typescript-node`, `python`. |
+| `--profile=<level>` | Control workflow scaffolding (v0.10+). Values: `minimal`, `standard` (default), `advanced`. See "Profile system" below. |
 | `--force` | Overwrite existing Claude config files. **Use only after committing or backing up.** Without this flag, kaizen will refuse to overwrite. |
-| `--minimal` | Only generate `CLAUDE.md` + `.claude/settings.json` + `.gitignore` patch. Skip rules, agents, hooks. |
+| `--minimal` | Only generate `CLAUDE.md` + `.claude/settings.json` + `.gitignore` patch. Independent of `--profile=minimal` (this is a file-count flag, profile controls workflow scaffolding). |
 
-Combine freely: `/kaizen:init --preset python --minimal`, `/kaizen:init --force --preset typescript-node`.
+Combine freely: `/kaizen:init --preset python --profile=advanced`, `/kaizen:init --force --preset typescript-node`.
+
+#### Profile system (v0.10+)
+
+The `--profile=<level>` flag controls how much **workflow scaffolding** kaizen includes in the generated config:
+
+| Profile | What it adds beyond the base scaffold |
+|---|---|
+| `minimal` | **Nothing extra**. Identical to v0.6 output. Use for throwaway projects or when you want to opt out of workflow recommendations. |
+| `standard` (default) | Adds `.claude/rules/workflow.md` documenting the kaizen-skill flow (when to run `/learn`, `/analyze`, `/preflight`, `/docs`, `/bump`, `/finish`). Appends a "Workflow" section to `CLAUDE.md`. No automation forced. |
+| `advanced` | Standard + `.claude/rules/workflow-advanced.md` with the **end-of-task ritual** (recommends `/kaizen:finish` before every commit). Adds a stack-specific Versioning section to `CLAUDE.md`. |
+
+**Important**: the plugin's new skills (`/docs`, `/bump`, `/finish`) and agents (`docs-keeper`, `versioner`) are **always available** when kaizen is installed. The profile only controls whether your `CLAUDE.md` and rules **document** them. To upgrade an existing project from `minimal` to `standard`, re-run `/kaizen:init --profile=standard --force` (requires existing-config approval).
 
 #### What gets written
 
@@ -681,6 +697,161 @@ Independent in v0.6. You can manually chain:
 ```
 
 v0.7 may add explicit composition flags (e.g., `--seed-todos` to push plan tasks into TodoWrite).
+
+### `/kaizen:docs [show] [--base=<ref>] [--since=<ref>] [--limit=<N>]` {#kaizendocs-arguments}
+
+Analyzes recent changes for **user-facing documentation gaps**. Spawns the `docs-keeper` plugin agent, which reads the diff and identifies which docs may be stale. **Never edits documentation** — surfacing only.
+
+Mirror skill to `/kaizen:learn` (which updates internal config docs in `CLAUDE.md`/rules) but scoped to user-facing docs (`README.md`, `docs/`, examples, CHANGELOG mentions).
+
+#### Subcommands and flags
+
+| Arg | Action |
+|---|---|
+| *(none)* | Analyze current state vs auto-detected base ref. |
+| `show` | Re-print last report from `.claude/kaizen/docs-report.md`. Exclusive. |
+| `--base=<ref>` | Override base ref (same logic as `/preflight`). |
+| `--since=<ref>` | Analyze commits since this ref. |
+| `--limit=<N>` | Analyze the last N commits. |
+
+#### Categories checked
+
+- Public API surface changes (new/renamed/removed exports)
+- CLI flag/command changes
+- Configuration schema changes
+- Behavioral changes (breaking changes, default changes)
+- Stale examples (renamed function still appears in docs)
+- Architecture/structure changes
+
+#### Typical workflow
+
+```
+# After implementing a feature, check if docs need updating:
+/kaizen:docs
+
+# Review:
+/kaizen:docs show
+
+# Update the flagged files manually, then optionally re-run to confirm clean.
+```
+
+#### Limits
+
+- Read-only. No edits to docs or source.
+- Bounded to 50 findings / 20 files sampled when diff is huge.
+- Never suggests creating new doc files (only "consider creating `README.md`" if NONE exist and changes are user-facing).
+
+---
+
+### `/kaizen:bump [show] [--base=<ref>] [--since=<ref>] [--limit=<N>]` {#kaizenbump-arguments}
+
+Suggests a semver bump (major/minor/patch) based on recent changes. Spawns the `versioner` plugin agent, which reads the diff + commit messages + version manifest. Detects changesets if `.changeset/config.json` exists. **Read-only** in v0.10 (suggestion only).
+
+#### Subcommands and flags
+
+| Arg | Action |
+|---|---|
+| *(none)* | Analyze since most recent git tag (fallback `HEAD~10`). |
+| `show` | Re-print last report from `.claude/kaizen/bump-report.md`. Exclusive. |
+| `--base=<ref>` | Override base ref. |
+| `--since=<ref>` | Analyze commits since this ref. |
+| `--limit=<N>` | Analyze the last N commits. |
+
+`--apply` is **deferred to v0.11** — v0.10 is suggestion-only. To apply: follow the report's "Apply guidance" section manually.
+
+#### Supported version manifests in v0.10
+
+| File | Stack | Version field |
+|---|---|---|
+| `package.json` | JS/TS | `.version` |
+| `pyproject.toml` | Python | `project.version` (PEP 621) OR `tool.poetry.version` |
+| `Cargo.toml` | Rust | `package.version` |
+
+Other formats: surfaced as "manual bump required" — no incorrect guessing.
+
+#### Semver classification
+
+- **`major`** — breaking changes (removed/renamed public API, incompatible signature changes, `BREAKING CHANGE:` in commit body, `feat!:` / `fix!:` conventional commit syntax).
+- **`minor`** — new functionality, backward-compatible (Conventional Commits `feat:`).
+- **`patch`** — bug fixes, refactors, docs, tests, chores (Conventional Commits `fix:`/`refactor:`/`docs:`/`test:`/`chore:`/`perf:`/`style:`/`build:`/`ci:`).
+
+For mixed-type diffs: highest applicable wins (any breaking → major; any feat → minor; else patch).
+
+#### Typical workflow
+
+```
+# After a sprint of work:
+/kaizen:bump
+
+# Review:
+/kaizen:bump show
+
+# Apply (manually in v0.10):
+# - If changesets mode: paste draft changeset into .changeset/<slug>.md
+# - If direct mode: edit the version field in your manifest
+
+# Tag and commit per your release process.
+```
+
+---
+
+### `/kaizen:finish [show] [--base=<ref>] [--skip=<phases>] [--auto-fix]` {#kaizenfinish-arguments}
+
+The **end-of-task ritual**. Runs everything you'd want to check before commit/PR in a single command. Combines `/preflight`'s checks with `/bump`'s version suggestion and `/docs`'s documentation gap analysis.
+
+**Architecturally**, this is the first kaizen skill to spawn **4 agents in parallel** in a single message: `preflight-security`, `commit-suggester`, `versioner`, `docs-keeper`.
+
+#### Subcommands and flags
+
+| Arg | Action |
+|---|---|
+| *(none)* | Full run: deterministic checks (tests/typecheck/lint) + 4 parallel agents + unified verdict. |
+| `show` | Re-print last report from `.claude/kaizen/finish-report.md`. Exclusive. |
+| `--base=<ref>` | Override the auto-detected base ref. |
+| `--skip=<phases>` | Skip phases. CSV of: `tests`, `typecheck`, `lint`, `security`, `commit`, `bump`, `docs`. |
+| `--auto-fix` | Same as `/preflight --auto-fix`: opt-in mutation. Applies lint/format fixes before checking. Only mutation path. |
+
+#### Phases
+
+1. **Setup** — resolve base ref, enumerate changes, detect stack + manifests.
+2. **Optional auto-fix** (only if `--auto-fix`).
+3. **Deterministic checks** (sequential, Bash): tests → typecheck → lint.
+4. **Parallel agents** (single message, up to 4 Task calls): security review + commit msg + version bump + docs gaps.
+5. **Verdict + report** — aggregated SHIP/HOLD/BLOCK with per-concern guidance.
+
+#### Verdict rules
+
+| Verdict | When |
+|---|---|
+| **BLOCK** | tests failed OR typecheck failed OR `critical` security finding |
+| **HOLD** | lint errors OR `high` security finding OR `high` docs finding |
+| **SHIP** | everything else |
+
+**Bump and docs are advisory** — they appear in the report but don't gate the verdict (the user calls those judgments).
+
+#### Typical workflow
+
+```
+# At task end:
+/kaizen:finish
+
+# Read the verdict + checklist:
+/kaizen:finish show
+
+# Address HOLD/BLOCK issues, re-run until SHIP:
+/kaizen:finish
+
+# Then commit (use the suggested message), bump (apply manually per /bump), update docs (per /docs findings).
+```
+
+#### When to use `/finish` vs the individual skills
+
+- **`/finish`** — closing a meaningful chunk of work. One report, one ritual.
+- **`/preflight`** — just want to verify before committing (no bump/docs analysis).
+- **`/bump`** alone — when you specifically need the version recommendation.
+- **`/docs`** alone — when you want to audit docs without running tests.
+
+`/finish` reuses the same plugin agents — no duplication, just one orchestrated invocation.
 
 ## Troubleshooting
 

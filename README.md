@@ -3,29 +3,38 @@
 > 改善 (kaizen) = continuous improvement.
 > A Claude Code plugin that scaffolds a complete, adapted `.claude/` setup for any project — empty or existing — and (in future versions) evolves it as the project grows.
 
-## What it does today (v0.9.0)
+## What it does today (v0.10.0)
 
-- `/kaizen:init` — analyzes your project (stack, maturity, git state, existing config) and generates a tailored `CLAUDE.md`, `.claude/settings.json`, path-scoped rules, a code-reviewer agent, and hooks. Outputs a per-file drift report.
-- `/kaizen:learn` — analyzes recent git activity (default: last 10 commits; `--since=<ref>` or `--limit=<N>` to scope) and proposes updates to `CLAUDE.md` / `.claude/rules/`. Writes proposals to `.claude/kaizen/pending.md` for review. Subcommands: `show`, `apply`, `discard`. Range analyzed is always shown up front. **Never modifies your config without explicit approval.**
-- `/kaizen:analyze` — read-only audit of the project against its own conventions and rules. Modes: `--best-practices`, `--coverage`, `--architecture`. Writes report to `.claude/kaizen/analyze-report.md`.
-- `/kaizen:preflight` — pre-merge gate. Runs tests/typecheck/lint sequentially, then dispatches `preflight-security` + `commit-suggester` agents in parallel. **SHIP / HOLD / BLOCK** verdict. Writes report to `.claude/kaizen/preflight-report.md`. Flags: `--base=<ref>` (override base), `--skip=<checks>` (skip specific checks), `--auto-fix` (opt-in: applies lint/format fixes to source before checking).
-- `/kaizen:plan` — auto-planner. Reads a spec (file, `--from-prompt="..."`, or `--from-issue=<N>` via gh CLI), dispatches `plan-context` + `plan-decomposer` agents in parallel, synthesizes an annotated task tree (type/complexity/dependencies/risks). Auto-converts PDF/DOCX when `pdftotext`/`pandoc` is on PATH. Plans accumulate at `.claude/kaizen/plans/<slug>-<timestamp>.md`. Optional `--seed-todos` pushes tasks to TodoWrite. Subcommands: `list`, `show`.
+**8 skills**, **6 plugin-level agents**, and a **profile system** for `/init`:
+
+- `/kaizen:init` — bootstraps the project config. Profile flag: `--profile=<minimal|standard|advanced>` (default `standard`). The base scaffolding generates `CLAUDE.md`, settings, rules, code-reviewer agent, and hooks; standard+ profiles add a `workflow.md` rule documenting the kaizen-skill flow.
+- `/kaizen:learn` — proposes CLAUDE.md/rules updates from git activity. `--limit=<N>` / `--since=<ref>` for scope. Subcommands: `show`, `apply`, `discard`.
+- `/kaizen:analyze` — read-only audit. Modes: `--best-practices`, `--coverage`, `--architecture`.
+- `/kaizen:preflight` — pre-merge gate. Tests + typecheck + lint + parallel security review + commit msg. SHIP/HOLD/BLOCK verdict. Flags: `--base`, `--skip`, `--auto-fix`.
+- `/kaizen:plan` — auto-planner. Spec (file / `--from-prompt` / `--from-issue`) → annotated task tree. Auto-converts PDF/DOCX. `--seed-todos`.
+- `/kaizen:docs` — surfaces user-facing documentation gaps from recent changes via the `docs-keeper` agent. Read-only.
+- `/kaizen:bump` — suggests semver bump (major/minor/patch) via the `versioner` agent. Detects changesets. Supports JS/TS, Python, Rust.
+- `/kaizen:finish` — **end-of-task orchestrator**. Chains deterministic checks + 4 parallel agents (security + commit + bump + docs) into a unified verdict and per-concern guidance.
 
 ## Plugin-level agents (shipped with kaizen)
 
-- `preflight-security` — security audit scoped to changed files. Invoked by `/kaizen:preflight`.
-- `commit-suggester` — Conventional Commits message author from diff analysis. Invoked by `/kaizen:preflight`.
-- `plan-context` — project state profiler (stack, architecture, conventions). Invoked by `/kaizen:plan`.
-- `plan-decomposer` — spec-to-task-list decomposer. Invoked by `/kaizen:plan`.
+- `preflight-security` — security audit (changed files). Used by `/preflight` + `/finish`.
+- `commit-suggester` — Conventional Commits message author. Used by `/preflight` + `/finish`.
+- `plan-context` — project profiler. Used by `/plan`.
+- `plan-decomposer` — spec → task list. Used by `/plan`.
+- `docs-keeper` — documentation gap analyzer. Used by `/docs` + `/finish`.
+- `versioner` — semver bump analyzer. Used by `/bump` + `/finish`.
 
-(These are distinct from the `code-reviewer.md` that `/kaizen:init` generates in your project — that one is user-customizable for manual general-purpose review.)
+(All distinct from the project-level `.claude/agents/code-reviewer.md` that `/kaizen:init` generates — that one is user-customizable for manual review.)
 
-## What's coming next (focus on polish, not new skills)
+## What's coming next
 
-- `/kaizen:learn` v0.7 — `--include-session` flag, better range visibility.
-- `/kaizen:analyze` v0.7 — `--dependencies`, `--security`, `--complexity` modes.
-- `/kaizen:preflight` v0.9 — risk-aware sizing; commit style auto-detection.
-- `/kaizen:plan` v0.10 — `--scope=<area>` (limit decomposition to a dir); `--depth=<shallow|medium|deep>` (granularity).
+Tracked in [BACKLOG.md](./BACKLOG.md). Highlights:
+- `/kaizen:bump --apply` (auto-modify manifest / write changeset)
+- `/kaizen:ci` skill (Phase 2 workflow initiative — CI/CD scaffolds)
+- `/kaizen:learn` `--include-session`
+- `/kaizen:analyze` `--dependencies` / `--security` / `--complexity` modes
+- `/kaizen:preflight` risk-aware sizing + commit style auto-detection
 
 ## Repo layout
 
@@ -40,26 +49,27 @@ kaizen/
         ├── bin/
         │   └── kaizen-detect     ← auto-added to PATH when plugin is enabled
         ├── agents/
-        │   ├── preflight-security.md         ← invoked by /kaizen:preflight (security audit)
-        │   ├── commit-suggester.md           ← invoked by /kaizen:preflight (commit msg)
-        │   ├── plan-context.md               ← invoked by /kaizen:plan (project profile)
-        │   └── plan-decomposer.md            ← invoked by /kaizen:plan (spec → task list)
+        │   ├── preflight-security.md         ← /preflight + /finish (security audit)
+        │   ├── commit-suggester.md           ← /preflight + /finish (commit msg)
+        │   ├── plan-context.md               ← /plan (project profile)
+        │   ├── plan-decomposer.md            ← /plan (spec → task list)
+        │   ├── docs-keeper.md                ← /docs + /finish (doc gap analyzer)
+        │   └── versioner.md                  ← /bump + /finish (semver bump)
         └── skills/
             ├── init/
-            │   ├── SKILL.md                  ← /kaizen:init entrypoint
+            │   ├── SKILL.md                  ← /kaizen:init (--profile=minimal|standard|advanced)
             │   └── templates/                ← what /init writes into user projects
-            │       ├── _shared/              ← stack-agnostic files
+            │       ├── _shared/              ← stack-agnostic files (incl. workflow.md)
             │       ├── generic/
             │       ├── typescript-node/
             │       └── python/
-            ├── learn/
-            │   └── SKILL.md                  ← /kaizen:learn (analyze/show/apply/discard)
-            ├── analyze/
-            │   └── SKILL.md                  ← /kaizen:analyze (--best-practices/--coverage/--architecture/show)
-            ├── preflight/
-            │   └── SKILL.md                  ← /kaizen:preflight (full run / show)
-            └── plan/
-                └── SKILL.md                  ← /kaizen:plan <spec> (full run / list / show)
+            ├── learn/SKILL.md                ← /kaizen:learn
+            ├── analyze/SKILL.md              ← /kaizen:analyze
+            ├── preflight/SKILL.md            ← /kaizen:preflight
+            ├── plan/SKILL.md                 ← /kaizen:plan
+            ├── docs/SKILL.md                 ← /kaizen:docs (v0.10+)
+            ├── bump/SKILL.md                 ← /kaizen:bump (v0.10+)
+            └── finish/SKILL.md               ← /kaizen:finish (v0.10+ orchestrator)
 ```
 
 ## Local development

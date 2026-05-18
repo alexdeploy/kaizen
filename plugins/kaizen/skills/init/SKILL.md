@@ -1,7 +1,7 @@
 ---
-description: Bootstrap the Claude Code configuration for this project. Detects stack and maturity, then scaffolds a tailored CLAUDE.md, settings.json, rules, agents, and hooks. Works on empty AND existing projects.
+description: Bootstrap the Claude Code configuration for this project. Detects stack and maturity, then scaffolds a tailored CLAUDE.md, settings.json, rules, agents, and hooks. Works on empty AND existing projects. Supports profiles (minimal/standard/advanced) controlling how much workflow scaffolding to include.
 disable-model-invocation: true
-argument-hint: "[--preset <name>] [--force] [--minimal]"
+argument-hint: "[--preset <name>] [--profile=<minimal|standard|advanced>] [--force] [--minimal]"
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash(kaizen-detect), Bash(kaizen-detect *), Bash(git *), Bash(chmod *), Bash(test *), Bash(ls *), Bash(find *), Bash(mkdir *)
 ---
 
@@ -19,11 +19,26 @@ At the end of the run, produce a **drift report** listing every adaptation you m
 
 `$ARGUMENTS` may contain:
 
-- `--preset <name>` — skip auto-detection, use a named preset (`typescript-node`, `python`, `generic`).
+- `--preset <name>` — skip stack auto-detection, use a named preset (`typescript-node`, `python`, `generic`).
+- `--profile=<level>` — control how much workflow scaffolding to include. Values: `minimal`, `standard` (default), `advanced`. See "Profile system" below.
 - `--force` — overwrite existing Claude config files. Without this flag, you must NEVER overwrite.
-- `--minimal` — only generate `CLAUDE.md` + `.claude/settings.json` + `.gitignore` patch.
+- `--minimal` — only generate `CLAUDE.md` + `.claude/settings.json` + `.gitignore` patch. Independent of `--profile=minimal` (which controls workflow scaffolding rather than file count).
 
 Parse them naively from `$ARGUMENTS` (split on whitespace).
+
+## Profile system (v0.10+)
+
+The `--profile=<level>` flag controls how much of kaizen's **advanced workflow** scaffolding gets included beyond the base bootstrap. Default: `standard`.
+
+| Profile | What it adds beyond base bootstrap |
+|---|---|
+| `minimal` | **Nothing extra**. Identical to v0.6 output — just CLAUDE.md, settings, 1 rule, code-reviewer agent, 2 hooks. Use for throwaway projects or when you don't want kaizen surfacing workflow recommendations. |
+| `standard` (default) | Adds `.claude/rules/workflow.md` documenting the kaizen-enabled workflow (when to run `/kaizen:learn`, `/analyze`, `/preflight`, `/docs`, `/bump`, `/finish`). Adds a "Workflow" section to CLAUDE.md mentioning these skills. **No automation forced** — the user invokes skills manually. |
+| `advanced` | Standard + a more detailed `.claude/rules/workflow-advanced.md` with the **end-of-task ritual** (recommend `/kaizen:finish` before every commit). Adds a stack-specific **Versioning** section to CLAUDE.md (changesets if monorepo, direct manifest bump otherwise). |
+
+The plugin's new skills (`/kaizen:docs`, `/kaizen:bump`, `/kaizen:finish`) and agents (`docs-keeper`, `versioner`) are **always available** when the kaizen plugin is installed, regardless of profile. The profile only controls whether the user's `CLAUDE.md` and rules **document** them as part of the recommended workflow.
+
+If a user with a `minimal` profile wants to upgrade later, they re-run `/kaizen:init --profile=standard --force` (will require approval since config exists).
 
 ---
 
@@ -202,7 +217,9 @@ For each template file:
 4. **Apply conditional removals**: per the table above. Track each one.
 5. **Write** to the target path under `cwd` (the user's project root).
 
-**Files to generate** (unless `--minimal`):
+**Files to generate** (unless `--minimal` file-count flag):
+
+Base set (all profiles):
 
 ```
 CLAUDE.md
@@ -215,7 +232,28 @@ CLAUDE.md
 .gitignore                  # append section
 ```
 
-If `--minimal`: only `CLAUDE.md` + `.claude/settings.json` + `.gitignore` patch.
+If `--profile=standard` (default) or `--profile=advanced`, **additionally** generate:
+
+```
+.claude/rules/workflow.md   # documents the kaizen-skill workflow
+```
+
+Append to `CLAUDE.md` a new `## Workflow` section that lists the kaizen skills (`/kaizen:learn`, `/analyze`, `/preflight`, `/docs`, `/bump`, `/finish`) and when to run each. Use the content from `templates/_shared/workflow.md` as the source of truth — substitute placeholders the same as other files.
+
+If `--profile=advanced`, **additionally** generate:
+
+```
+.claude/rules/workflow-advanced.md   # adds the end-of-task ritual: run /kaizen:finish before every commit
+```
+
+Append to `CLAUDE.md` a `## Versioning` section adapted to the stack:
+- JS/TS with detected `.changeset/` → recommend changesets workflow
+- JS/TS without changesets → recommend direct `package.json` bump
+- Python → recommend direct `pyproject.toml` bump
+- Rust → recommend direct `Cargo.toml` bump
+- Other → recommend manual version tracking
+
+If `--minimal` file-count flag is passed: only `CLAUDE.md` + `.claude/settings.json` + `.gitignore` patch. Profile is ignored (treated as `minimal` effectively).
 
 After writing hook scripts, run `chmod +x` on each via Bash tool.
 
@@ -232,6 +270,7 @@ Print the summary in this exact format:
 
 Detected: <STACK_RAW> / <package_manager> / <maturity>
 Preset:   <preset-used>
+Profile:  <profile-used>   ← v0.10+
 Stack:    <STACK_FRIENDLY>
 
 Files created:
