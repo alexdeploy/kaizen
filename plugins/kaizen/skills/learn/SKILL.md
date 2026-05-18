@@ -1,7 +1,7 @@
 ---
 description: Analyze recent git activity and propose updates to CLAUDE.md / .claude/rules/ based on patterns found. Always writes proposals to a pending file for user review. NEVER modifies CLAUDE.md silently.
 disable-model-invocation: true
-argument-hint: "[apply|discard|show] [--since=<ref>]"
+argument-hint: "[apply|discard|show] [--since=<ref>] [--limit=<N>]"
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash(git log *), Bash(git diff *), Bash(git show *), Bash(git status), Bash(git rev-parse *), Bash(git rev-list *), Bash(git branch *), Bash(test *), Bash(mkdir *), Bash(rm *), Bash(cat *)
 ---
 
@@ -38,7 +38,10 @@ Parse `$ARGUMENTS` naively. The first non-flag word is the subcommand.
 | `discard` | Delete `pending.md` without applying |
 
 Flags:
-- `--since=<git-ref>` — analyze commits since this ref (default: `HEAD~10`)
+- `--since=<git-ref>` — analyze commits since this ref (e.g., `HEAD~25`, `v1.0.0`, `2 weeks ago`)
+- `--limit=<N>` — analyze the last N commits (equivalent to `--since=HEAD~<N>`, but more intuitive for "just look at the last N")
+
+**Default range when neither flag is given**: `HEAD~10` (the last 10 commits). If both flags are given, `--since` wins. **Always print the resolved range explicitly** in the report header and console summary so the user is never guessing what was analyzed.
 
 ---
 
@@ -62,16 +65,31 @@ If it exists, **stop**. Print:
 
 ### Step 2: gather signal (git only in v0)
 
-Use the Bash tool with these commands:
+**First, resolve the analysis range** from `$ARGUMENTS`:
+
+| Flags present | Resolved range |
+|---|---|
+| `--since=<ref>` | `<ref>..HEAD` |
+| `--limit=<N>` (and no `--since`) | `HEAD~<N>..HEAD` |
+| Neither | `HEAD~10..HEAD` (default) |
+| Both `--since` and `--limit` | `--since` wins; note in report header |
+
+Store the resolved range as `<base>..HEAD`. **Print it before doing anything else** — the user should see the chosen range up front, not buried in the report. Example console line:
+
+```
+kaizen learn: analyzing range HEAD~10..HEAD (10 commits)
+```
+
+Then use the Bash tool:
 
 ```bash
 git rev-parse --is-inside-work-tree   # verify git repo
-git log --oneline -10                   # recent commit messages (or --since=<arg>)
-git diff HEAD~10 HEAD --stat            # files changed
-git diff HEAD~10 HEAD                   # full diff content (truncate if huge)
+git log --oneline <base>..HEAD          # recent commit messages
+git diff <base>..HEAD --stat            # files changed
+git diff <base>..HEAD                   # full diff content (truncate if huge)
 ```
 
-If `--since=<ref>` was provided, use it instead of `HEAD~10`.
+If `git log` returns fewer commits than expected (e.g., user asked for `HEAD~50` but the repo only has 12 commits), the actual count is what you analyze — but **note the discrepancy in the report**. Don't silently shrink.
 
 **Bound the diff**: if the diff is larger than ~500 lines, sample by getting only the file stats and reading individual files of interest. Don't blow your context on a massive refactor.
 
@@ -119,7 +137,11 @@ Write `.claude/kaizen/pending.md` with this **exact** structure:
 
 Generated: <ISO 8601 timestamp>
 Plugin version: <plugin version from plugin.json>
-Signal sources used: git (range: <git-ref>..HEAD, <N> commits)
+
+**Range analyzed**: `<base>..HEAD` (<N> commits)
+**Signal sources used**: git only (v0.7 — opt-in `--include-session` planned for v0.8)
+**Oldest commit in range**: `<sha> <one-line subject>`
+**Newest commit in range**: `<sha> <one-line subject>`
 
 > Review each proposal below. Run `/kaizen:learn apply` to accept all, `/kaizen:learn discard` to throw away, or edit this file by hand to refine before applying.
 
@@ -171,7 +193,7 @@ Pending proposals are WIP; the team shouldn't see them until accepted.
 Print:
 
 ```
-✓ kaizen learn: analyzed <N> commits (<ref>..HEAD)
+✓ kaizen learn: analyzed <N> commits in range <base>..HEAD
 
 <M> proposals written to .claude/kaizen/pending.md
 
@@ -185,7 +207,11 @@ Next:
   /kaizen:learn apply    # apply all
   /kaizen:learn discard  # throw away
   (or edit .claude/kaizen/pending.md by hand)
+
+Tip: re-run with --since=<ref> or --limit=<N> to change the range.
 ```
+
+**Always lead with the range** ("`<N> commits in range <base>..HEAD`"). Never make the user dig through the report to figure out what was looked at.
 
 ---
 
@@ -269,6 +295,22 @@ Print:
 ```
 
 ---
+
+## When to run `/kaizen:learn` (v0.7 guidance)
+
+`/learn` is for **incremental config evolution after work has happened** — NOT for initial deep-knowledge seeding (that's `/kaizen:init`'s job).
+
+| Situation | Use this |
+|---|---|
+| Fresh project, no `CLAUDE.md` yet | `/kaizen:init` |
+| You just finished a task and want to ask "did anything emerge worth documenting?" | `/kaizen:learn` |
+| `CLAUDE.md` exists but feels stale because the project has grown | `/kaizen:learn --since=<old-tag-or-ref>` |
+| You want to audit current code against existing rules | `/kaizen:analyze` (different skill) |
+| You want a pre-merge gate | `/kaizen:preflight` (different skill) |
+
+**Recommended cadence**: end of a sprint, end of a feature branch, or after a multi-day chunk of work — not after every single Claude response. Running `/learn` too frequently produces low-signal proposals and adds friction.
+
+**If you find yourself running `/learn` and consistently discarding proposals**: the default range (`HEAD~10`) may not match your work rhythm. Try `--since=<feature-branch-base>` to scope to the actual change set you care about, or `--limit=<N>` to match your team's typical sprint commit count.
 
 ## Hard rules (never violate)
 

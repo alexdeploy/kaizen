@@ -394,21 +394,23 @@ The user **can edit `pending.md` by hand** before applying. Common edits: change
 ## Signal sources — current and roadmap
 
 ```
-                  v0.3 (today)                    v0.4 (planned)               v0.5 (planned)
+                  v0.7 (today)                    v0.8 (planned)               v0.9+ (planned)
                   ─────────────                   ──────────────               ──────────────
               ┌──────────────────┐           ┌──────────────────┐         ┌──────────────────┐
               │  git log/diff    │           │  git log/diff    │         │  git log/diff    │
-              │                  │           │  + session conv. │         │  + session conv. │
-              │                  │           │   (opt-in)       │         │  + auto-memory   │
+              │  + range control │           │  + session conv. │         │  + session conv. │
+              │  (--since/--limit)│          │   (opt-in)       │         │  + auto-memory   │
               │                  │           │                  │         │   (opt-in)       │
               └────────┬─────────┘           └────────┬─────────┘         └────────┬─────────┘
                        │                              │                            │
                        ▼                              ▼                            ▼
                   conservative,             richer (captures             richest (cross-session
-                  deterministic             user corrections             learning), needs
-                                            not in commits)              anti-circularity
+                  deterministic;            user corrections             learning), needs
+                  range explicit            not in commits)              anti-circularity
                                                                          safeguards
 ```
+
+**v0.7 added**: explicit range control via `--limit=<N>` (in addition to existing `--since=<ref>`), plus prominent range labeling in both the console summary and `pending.md` header. Addresses a real UX gap observed during validation: "I don't know what was analyzed".
 
 **Why this order**: each step up adds richer signal but also more failure modes. Git is stable and intentional. Session conversation captures real-time guidance but is volatile. Auto-memory is what Claude told itself — most "advanced" but risks self-reinforcement without dedup against current CLAUDE.md content.
 

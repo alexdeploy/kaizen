@@ -3,10 +3,10 @@
 > 改善 (kaizen) = continuous improvement.
 > A Claude Code plugin that scaffolds a complete, adapted `.claude/` setup for any project — empty or existing — and (in future versions) evolves it as the project grows.
 
-## What it does today (v0.6.0)
+## What it does today (v0.7.0)
 
 - `/kaizen:init` — analyzes your project (stack, maturity, git state, existing config) and generates a tailored `CLAUDE.md`, `.claude/settings.json`, path-scoped rules, a code-reviewer agent, and hooks. Outputs a per-file drift report.
-- `/kaizen:learn` — analyzes recent git activity and proposes updates to `CLAUDE.md` / `.claude/rules/`. Writes proposals to `.claude/kaizen/pending.md` for review. Subcommands: `show`, `apply`, `discard`. **Never modifies your config without explicit approval.**
+- `/kaizen:learn` — analyzes recent git activity (default: last 10 commits; `--since=<ref>` or `--limit=<N>` to scope) and proposes updates to `CLAUDE.md` / `.claude/rules/`. Writes proposals to `.claude/kaizen/pending.md` for review. Subcommands: `show`, `apply`, `discard`. Range analyzed is always shown up front. **Never modifies your config without explicit approval.**
 - `/kaizen:analyze` — read-only audit of the project against its own conventions and rules. Modes: `--best-practices`, `--coverage`, `--architecture`. Writes report to `.claude/kaizen/analyze-report.md`.
 - `/kaizen:preflight` — pre-merge gate. Runs tests/typecheck/lint sequentially, then dispatches `preflight-security` + `commit-suggester` agents in parallel. **SHIP / HOLD / BLOCK** verdict. Writes report to `.claude/kaizen/preflight-report.md`.
 - `/kaizen:plan` — auto-planner. Reads a spec doc, dispatches `plan-context` + `plan-decomposer` agents in parallel, synthesizes an annotated task tree (type/complexity/dependencies/risks). Plans accumulate at `.claude/kaizen/plans/<slug>-<timestamp>.md`. Subcommands: `list`, `show`.

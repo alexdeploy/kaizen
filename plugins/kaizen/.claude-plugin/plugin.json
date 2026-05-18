@@ -1,7 +1,7 @@
 {
   "name": "kaizen",
   "description": "Bootstrap and continuous improvement for Claude Code projects: scaffolds .claude/, adapts to existing repos, evolves config as the project grows",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "author": {
     "name": "Alex Rueda",
     "email": "alexruedadev@gmail.com"

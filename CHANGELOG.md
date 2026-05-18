@@ -10,11 +10,29 @@ While v0.x, **minor versions may include breaking changes**. From v1.0.0 onward,
 
 ## [Unreleased]
 
-### Planned (focus shifts to polish + UX improvements after v0.6.0)
-- `/kaizen:learn` v0.7 — `--include-session` flag (analyze current session conversation for user corrections); make commit range more visible in the report header.
-- `/kaizen:analyze` v0.7 — additional modes: `--dependencies` (npm outdated/audit), `--security`, `--complexity`.
-- `/kaizen:preflight` v0.7 — `--base=<ref>`, `--skip=<checks>`, `--auto-fix` flags; risk-aware sizing; commit style auto-detection from history.
-- `/kaizen:plan` v0.7 — inline prompt input (`--from-prompt`); gh issue input (`--from-issue`); auto-conversion of PDF/DOCX if `pdftotext`/`pandoc` installed; `--seed-todos` to push to TodoWrite.
+### Planned (polish + UX improvements; no new top-level skills)
+- `/kaizen:learn` v0.8 — `--include-session` flag (analyze current Claude Code session conversation for user corrections — needs careful design around accessing the transcript).
+- `/kaizen:analyze` v0.8 — additional modes: `--dependencies` (npm outdated/audit), `--security`, `--complexity`.
+- `/kaizen:preflight` v0.8 — `--base=<ref>`, `--skip=<checks>`, `--auto-fix` flags; risk-aware sizing; commit style auto-detection from history.
+- `/kaizen:plan` v0.8 — inline prompt input (`--from-prompt`); gh issue input (`--from-issue`); auto-conversion of PDF/DOCX if `pdftotext`/`pandoc` installed; `--seed-todos` to push to TodoWrite.
+
+---
+
+## [0.7.0] — 2026-05-19
+
+### Improved — `/kaizen:learn` UX (addresses user feedback from real usage)
+
+- **Range visibility is now prominent** — the analyzed git range (`<base>..HEAD` + commit count) is shown at the top of both the console summary and the `pending.md` header. No more "wait, what commits did this look at?". The `pending.md` header now also includes oldest/newest commit SHAs and subjects for unambiguous context.
+- **New `--limit=<N>` flag** — analyze the last N commits explicitly. Equivalent to `--since=HEAD~<N>` but more intuitive for the common case of "just look at the last N". Both flags can coexist; `--since` wins if both given (noted in report).
+- **"When to run" guidance** — new section in SKILL.md and user-manual that explicitly disambiguates `/learn` from `/init` and other skills. Recommended cadence (end of sprint / feature branch / multi-day chunk — not after every Claude response). Addresses a user-observed ambiguity in v0.3-v0.6.
+- **Honest signal source labeling** — `pending.md` header now says `Signal sources used: git only (v0.7 — opt-in --include-session planned for v0.8)`. Sets expectations.
+
+### Acknowledged but deferred
+- `--include-session` flag remains v0.8. It needs design work on **how** the skill accesses prior conversation in Claude Code (not a trivial tool call). v0.7 documents the limitation rather than ships a half-baked version.
+
+### Notes
+- Pure additive changes to `/kaizen:learn`. No breaking changes. Old `--since=<ref>` continues to work; `--limit` is a new alternative.
+- The user feedback that drove this release came from `NOTES.md` in the kaizen repo (now gitignored) — captured into memory and resolved in this version. Demonstrates the "observed-in-use → atendido" loop.
 
 ---
 

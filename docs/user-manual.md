@@ -62,7 +62,7 @@ You'll see Claude run `detect.sh`, report what it found, and either generate fil
 
 ## Command reference
 
-Commands shipped in v0.6.0:
+Commands shipped in v0.7.0:
 - [`/kaizen:init`](#kaizeninit-arguments) — bootstrap project config
 - [`/kaizen:learn`](#kaizenlearn-arguments) — propose config updates from git activity
 - [`/kaizen:analyze`](#kaizenanalyze-arguments) — read-only audit of code vs. stated rules
@@ -228,13 +228,22 @@ Analyzes recent git activity and proposes updates to `CLAUDE.md` / `.claude/rule
 
 | Flag | Meaning |
 |---|---|
-| `--since=<git-ref>` | Analyze commits since this ref. Default: `HEAD~10`. Examples: `--since=HEAD~25`, `--since=v1.0.0`, `--since=2 weeks ago`. |
+| `--since=<git-ref>` | Analyze commits since this ref. Examples: `--since=HEAD~25`, `--since=v1.0.0`, `--since=2 weeks ago`. |
+| `--limit=<N>` | Analyze the last N commits. Equivalent to `--since=HEAD~<N>` but more intuitive for "just look at the last N". |
+
+**Default range** (no flag): `HEAD~10..HEAD` (last 10 commits). If both `--since` and `--limit` are given, `--since` wins.
+
+The resolved range is **always shown** at the top of the console summary AND the `pending.md` header — you never need to guess what was analyzed.
 
 #### Typical workflow
 
 ```
 # After a few days of work, see what kaizen suggests:
 /kaizen:learn
+
+# Or scope to a specific range:
+/kaizen:learn --since=v1.0.0
+/kaizen:learn --limit=20
 
 # Review the proposals:
 /kaizen:learn show
@@ -247,6 +256,22 @@ Analyzes recent git activity and proposes updates to `CLAUDE.md` / `.claude/rule
 
 # You can also EDIT pending.md by hand to refine before applying.
 ```
+
+#### When to run `/kaizen:learn` (vs other skills)
+
+`/learn` is for **incremental config evolution after work has happened** — NOT for initial deep knowledge seeding.
+
+| Situation | Use this |
+|---|---|
+| Fresh project, no `CLAUDE.md` yet | `/kaizen:init` |
+| You just finished a task and want to ask "did anything emerge worth documenting?" | `/kaizen:learn` |
+| `CLAUDE.md` exists but feels stale because the project has grown | `/kaizen:learn --since=<old-tag>` |
+| You want to audit current code against existing rules | `/kaizen:analyze` |
+| You want a pre-merge gate | `/kaizen:preflight` |
+
+**Recommended cadence**: end of a sprint, end of a feature branch, or after a multi-day chunk of work. Not after every single Claude response — running too frequently produces low-signal proposals and adds friction.
+
+**If you find yourself running `/learn` and consistently discarding proposals**: the default range (`HEAD~10`) may not match your work rhythm. Try `--since=<feature-branch-base>` to scope to the actual change set, or `--limit=<N>` to match your team's typical sprint commit count.
 
 #### What gets proposed
 
@@ -269,9 +294,9 @@ You can edit `pending.md` by hand before applying: tweak wording, delete a propo
 
 #### Signal sources
 
-- **v0.3 (today)**: git only — `git log` and `git diff` from the last N commits.
-- **v0.4 (planned)**: optional `--include-session` flag to also analyze the current conversation for user corrections.
-- **v0.5 (planned)**: optional `--include-memory` flag to read Claude's auto-memory.
+- **v0.7 (today)**: git only — `git log` and `git diff` from the resolved range.
+- **v0.8 (planned)**: optional `--include-session` flag to also analyze the current Claude Code conversation for user corrections.
+- **v0.9+ (planned)**: optional `--include-memory` flag to read Claude's auto-memory (with anti-circularity safeguards).
 
 See the [SKILL.md source](../plugins/kaizen/skills/learn/SKILL.md) for the full roadmap with tradeoffs.
 

@@ -75,7 +75,7 @@ Welcome. This folder documents how the kaizen plugin behaves **once it's install
 
 ## Version
 
-This documentation tracks kaizen **v0.6.0** — the v0 skill set is complete. Currently shipped commands:
+This documentation tracks kaizen **v0.7.0** — the v0 skill set is complete; v0.7+ ships polish + UX improvements rather than new skills. Currently shipped commands:
 
 - `/kaizen:init` — bootstrap (covered in detail throughout these docs)
 - `/kaizen:learn` — propose CLAUDE.md updates from git activity (see [user-manual.md](./user-manual.md#kaizenlearn-arguments))

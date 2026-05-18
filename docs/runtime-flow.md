@@ -622,11 +622,12 @@ Run `/kaizen:learn`:
 
 | Action | Idempotent? |
 |---|---|
-| `/kaizen:learn` (no args) | Effectively yes — if pending exists, refuses; if not, analyzes fresh. Re-running gives same or similar proposals from same git range. |
+| `/kaizen:learn` (no args) | Effectively yes — if pending exists, refuses; if not, analyzes fresh. Default range `HEAD~10..HEAD`. |
 | `/kaizen:learn show` | Yes — pure read. |
 | `/kaizen:learn apply` | No — applies and deletes. Second invocation has nothing to apply. |
 | `/kaizen:learn discard` | Yes — deleting a missing file is a no-op. |
-| `/kaizen:learn --since=<X>` | Yes for the same X — analysis is deterministic given inputs. (Different X gives different proposals; that's signal, not bug.) |
+| `/kaizen:learn --since=<X>` | Yes for the same X — analysis is deterministic given inputs. |
+| `/kaizen:learn --limit=<N>` | Yes for the same N — equivalent to `--since=HEAD~<N>`. v0.7+. |
 
 ---
 
