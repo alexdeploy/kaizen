@@ -1670,3 +1670,66 @@ flowchart TD
 ```
 
 The plugin's skills (`/docs`, `/bump`, `/finish`, etc.) are always available regardless of profile — the profile only controls whether the project's CLAUDE.md surfaces them as the recommended workflow. A `minimal`-profile project user can still invoke `/kaizen:finish`; they just won't be prompted to.
+
+---
+
+# 18. Visibility layer runtime (v0.11.0+)
+
+## 18.1 Statusline read loop
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Claude as Claude Code (TUI)
+    participant Script as statusline.sh
+    participant Files as kaizen artifact files
+    participant Git as git
+
+    loop periodically (Claude Code's redraw cadence)
+        Claude->>Script: spawn with session JSON on stdin
+        Script->>Script: parse model + cwd (jq)
+        Script->>Git: branch + status --porcelain
+        Script->>Files: exist? finish-report.md / pending.md / plans/
+        Script-->>Claude: single-line output
+        Claude->>Claude: render at bottom of TUI
+    end
+```
+
+Performance budget: <100ms per invocation. Bash + git + jq only.
+
+## 18.2 Subagent statusline activation
+
+```mermaid
+flowchart TD
+    Start[/Multi-agent skill invoked<br/>(/preflight, /plan, /finish)/] --> Spawn[Task tool spawns subagent]
+    Spawn --> Active{Subagent active}
+    Active --> Script[plugins/kaizen/hooks/scripts/<br/>subagent-statusline.sh runs]
+    Script --> Map[Map agent name → label]
+    Map --> Render[TUI shows: '🔒 security review running…']
+    Render --> Done{Subagent finishes}
+    Done -->|continue| Active
+    Done -->|all done| Cleared[Statusline returns to normal]
+```
+
+When multiple subagents run in parallel (e.g., `/finish`'s 4-agent dispatch), the subagent statusline shows the currently-active one. Behavior with multiple simultaneous active subagents depends on Claude Code's rendering — typically shows the most recent.
+
+## 18.3 Output style application
+
+```mermaid
+flowchart LR
+    Settings[.claude/settings.json] -->|outputStyle: kaizen-terse| Resolve{Style file exists?}
+    Resolve -->|.claude/output-styles/kaizen-terse.md| Append[Style content appended to<br/>Claude's system prompt at session start]
+    Append --> Apply[All Claude responses in session<br/>follow terseness rules]
+```
+
+The style is fixed at session start — changes take effect on the **next** session (Claude Code caches the system prompt for the duration). To switch styles, edit settings and start a new session.
+
+## 18.4 Idempotency
+
+| Action | Idempotent? |
+|---|---|
+| Statusline script | Yes — pure read, no side effects |
+| Subagent statusline script | Yes — pure read |
+| Output style activation | Yes — same setting = same behavior |
+
+All three are stateless / read-only. They surface state; they don't create or modify it.

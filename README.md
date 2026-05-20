@@ -3,7 +3,7 @@
 > 改善 (kaizen) = continuous improvement.
 > A Claude Code plugin that scaffolds a complete, adapted `.claude/` setup for any project — empty or existing — and (in future versions) evolves it as the project grows.
 
-## What it does today (v0.10.0)
+## What it does today (v0.11.0)
 
 **8 skills**, **6 plugin-level agents**, and a **profile system** for `/init`:
 
@@ -15,6 +15,12 @@
 - `/kaizen:docs` — surfaces user-facing documentation gaps from recent changes via the `docs-keeper` agent. Read-only.
 - `/kaizen:bump` — suggests semver bump (major/minor/patch) via the `versioner` agent. Detects changesets. Supports JS/TS, Python, Rust.
 - `/kaizen:finish` — **end-of-task orchestrator**. Chains deterministic checks + 4 parallel agents (security + commit + bump + docs) into a unified verdict and per-concern guidance.
+
+## Visibility (v0.11+)
+
+- **Statusline**: `/kaizen:init` generates `.claude/hooks/statusline.sh` that surfaces `[model] dir ⎇ branch  ✓/⚠/✗ verdict  ·  ⚠ learn pending  ·  📋 N plan(s)  ·  N modified` at the bottom of the TUI.
+- **Subagent statusline**: plugin-level, shows which kaizen agent is running during `/preflight` / `/plan` / `/finish` parallel dispatch (e.g., `🔒 security review running…`).
+- **Output style `kaizen-terse`** (opt-in, written by `--profile=advanced`): enforces terse responses — no preambles, no narration, no padding.
 
 ## Plugin-level agents (shipped with kaizen)
 

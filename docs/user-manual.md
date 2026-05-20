@@ -62,7 +62,7 @@ You'll see Claude run `detect.sh`, report what it found, and either generate fil
 
 ## Command reference
 
-Commands shipped in v0.10.0:
+Commands shipped in v0.11.0 (same 8 skills as v0.10.0 + visibility layer):
 - [`/kaizen:init`](#kaizeninit-arguments) — bootstrap project config (with `--profile` system)
 - [`/kaizen:learn`](#kaizenlearn-arguments) — propose config updates from git activity
 - [`/kaizen:analyze`](#kaizenanalyze-arguments) — read-only audit of code vs. stated rules
@@ -852,6 +852,66 @@ The **end-of-task ritual**. Runs everything you'd want to check before commit/PR
 - **`/docs`** alone — when you want to audit docs without running tests.
 
 `/finish` reuses the same plugin agents — no duplication, just one orchestrated invocation.
+
+## Visibility layer (v0.11+)
+
+Three additions that surface kaizen state in the UI:
+
+### Statusline
+
+`/kaizen:init` generates `.claude/hooks/statusline.sh` for all profiles. Declared in `settings.json` as the `statusLine` command. Renders a single line at the bottom of Claude Code's TUI showing:
+
+```
+[opus-4.7] my-app ⎇ feat/auth  ✓ SHIP  ·  ⚠ learn pending  ·  📋 2 plan(s)  ·  5 modified
+```
+
+Components (each optional, only shown if applicable):
+
+| Segment | Source |
+|---|---|
+| `[model]` | Session payload `.model.display_name` |
+| `dir` | basename of cwd |
+| `⎇ branch` | `git branch --show-current` |
+| `✓/⚠/✗ verdict` | Last `/kaizen:finish` verdict from `.claude/kaizen/finish-report.md` |
+| `⚠ learn pending` | If `.claude/kaizen/pending.md` exists |
+| `📋 N plan(s)` | Count of plans in `.claude/kaizen/plans/` modified in last 7 days |
+| `N modified` | `git status --porcelain` line count |
+
+Gracefully degrades if `jq` or `git` are absent. Customize by editing the script — it's yours.
+
+### Subagent statusline (plugin-level)
+
+When `/preflight`, `/plan`, or `/finish` run in parallel multi-agent mode, the subagent statusline shows which kaizen agent is currently active:
+
+```
+🔒 security review running…
+📦 version bump running…
+📚 doc gap check running…
+```
+
+Mapped from agent name to descriptive label (preflight-security → 🔒 security review, etc.). Configured via `plugins/kaizen/settings.json`'s `subagentStatusLine` key — no project-level setup needed; just works when kaizen is installed.
+
+### Output style `kaizen-terse` (opt-in)
+
+`/kaizen:init --profile=advanced` writes `.claude/output-styles/kaizen-terse.md`. To activate:
+
+```json
+// .claude/settings.json
+{ "outputStyle": "kaizen-terse" }
+```
+
+Or pick interactively via `/output-style` if your Claude Code version supports it.
+
+What it enforces:
+- No preambles ("Sure!", "Of course!", "I'll start by…")
+- No narration of upcoming actions
+- No closing summaries of what just happened
+- Lead with the answer, context after
+- Match response length to question
+
+Uses `keep-coding-instructions: true` so default software-engineering task instructions stay intact — only the terseness layer is added.
+
+Return to default by setting `"outputStyle": "default"` or removing the key.
 
 ## Troubleshooting
 

@@ -1,0 +1,9 @@
+{
+  "_comment": "kaizen :: plugin-level settings. Only `agent` and `subagentStatusLine` keys are honored by Claude Code in plugin settings.json. Other settings.json keys must live in the user's project (.claude/settings.json) or global config (~/.claude/settings.json).",
+  "_docs": "https://code.claude.com/docs/en/plugins",
+
+  "subagentStatusLine": {
+    "type": "command",
+    "command": "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/subagent-statusline.sh"
+  }
+}

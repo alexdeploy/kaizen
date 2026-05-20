@@ -75,7 +75,7 @@ Welcome. This folder documents how the kaizen plugin behaves **once it's install
 
 ## Version
 
-This documentation tracks kaizen **v0.10.0** — the advanced workflow scaffold release. 8 skills + 6 plugin-level agents + profile system for `/init`. Currently shipped commands:
+This documentation tracks kaizen **v0.11.0** — adds visibility layer (statusline + subagent statusline + opt-in output style) on top of v0.10's advanced workflow scaffold. 8 skills + 6 plugin-level agents + profile system + visibility surface. Currently shipped commands:
 
 - `/kaizen:init` — bootstrap (covered in detail throughout these docs)
 - `/kaizen:learn` — propose CLAUDE.md updates from git activity (see [user-manual.md](./user-manual.md#kaizenlearn-arguments))

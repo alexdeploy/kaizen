@@ -229,7 +229,8 @@ CLAUDE.md
 .claude/agents/code-reviewer.md
 .claude/hooks/format-on-save.sh
 .claude/hooks/session-start.sh
-.gitignore                  # append section
+.claude/hooks/statusline.sh   # v0.11+ — referenced via `statusLine` in settings.json
+.gitignore                    # append section
 ```
 
 If `--profile=standard` (default) or `--profile=advanced`, **additionally** generate:
@@ -243,8 +244,11 @@ Append to `CLAUDE.md` a new `## Workflow` section that lists the kaizen skills (
 If `--profile=advanced`, **additionally** generate:
 
 ```
-.claude/rules/workflow-advanced.md   # adds the end-of-task ritual: run /kaizen:finish before every commit
+.claude/rules/workflow-advanced.md       # adds the end-of-task ritual: run /kaizen:finish before every commit
+.claude/output-styles/kaizen-terse.md    # v0.11+ opt-in output style — terse responses, no preambles
 ```
+
+Append to `CLAUDE.md` a `## Output style` section (short, ~3 lines): mention that `kaizen-terse` is shipped at `.claude/output-styles/kaizen-terse.md` and can be activated by setting `"outputStyle": "kaizen-terse"` in `.claude/settings.json` (or via `/output-style` if Claude Code version supports interactive selection).
 
 Append to `CLAUDE.md` a `## Versioning` section adapted to the stack:
 - JS/TS with detected `.changeset/` → recommend changesets workflow

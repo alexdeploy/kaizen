@@ -1226,3 +1226,64 @@ Same as the union of `/preflight` + `/bump` + `/docs` boundaries. Writes only `.
 **Crucial**: the plugin's skills and agents are **always available** when kaizen is installed — the profile only controls whether the project's CLAUDE.md and rules **document** them. A minimal-profile project can still invoke `/kaizen:finish` — the user just won't be reminded to.
 
 The profile is **additive** with no breaking change: existing v0.6-generated configs (effectively `minimal`) continue to work unchanged.
+
+---
+
+# 18. Visibility layer (v0.11.0+)
+
+> Where v0.6–v0.10 built skills/agents that the user must invoke, v0.11 surfaces kaizen state in the UI continuously. Three components: statusline, subagent statusline, output style.
+
+## Statusline (project-level)
+
+A bash script at `.claude/hooks/statusline.sh` (written by `/init` for all profiles) declared via the `statusLine` key in `.claude/settings.json`. Claude Code runs it periodically with session JSON on stdin; the first line of output is rendered at the bottom of the TUI.
+
+**Output format**: `[model] dir ⎇ branch  <kaizen-segment>  ·  N modified`
+
+The kaizen-segment is composed conditionally from existence checks on artifact files:
+- `.claude/kaizen/finish-report.md` → parses verdict line → `✓ SHIP` / `⚠ HOLD` / `✗ BLOCK`
+- `.claude/kaizen/pending.md` exists → `⚠ learn pending`
+- `.claude/kaizen/plans/*.md` modified in last 7 days → `📋 N plan(s)`
+
+**Performance constraint**: must complete in <100ms (runs frequently). Uses pure bash + standard tools (`git`, `jq`); no LLM calls.
+
+**Degradation**: missing `jq` → falls back to "claude" model + basename of pwd. Missing `git` → no branch / no modified-count. Never crashes the TUI.
+
+## Subagent statusline (plugin-level)
+
+`plugins/kaizen/settings.json` declares `subagentStatusLine` pointing to `plugins/kaizen/hooks/scripts/subagent-statusline.sh`. The first plugin-level setting kaizen ships (per Claude Code docs, plugin settings.json only honors `agent` and `subagentStatusLine`).
+
+Active during multi-agent dispatches (`/preflight` 2 agents, `/plan` 2 agents, `/finish` 4 agents). Maps known agent identifiers to human-readable labels:
+
+| Agent name | Label |
+|---|---|
+| `preflight-security` | `🔒 security review` |
+| `commit-suggester` | `✎ commit suggestion` |
+| `versioner` | `📦 version bump` |
+| `docs-keeper` | `📚 doc gap check` |
+| `plan-context` | `🗺  project context` |
+| `plan-decomposer` | `📋 spec decomposition` |
+| `code-reviewer` | `👁  code review` |
+| anything else | `🤖 <name>` |
+
+Output suffix: `running…`.
+
+## Output style `kaizen-terse` (opt-in, advanced profile)
+
+`.claude/output-styles/kaizen-terse.md` written by `/init --profile=advanced`. User activates via `outputStyle: "kaizen-terse"` in settings.json (or `/output-style` interactive). The style is appended to Claude's system prompt; uses `keep-coding-instructions: true` to keep default software-engineering instructions intact.
+
+Enforces:
+- No preambles, no narration of upcoming actions, no closing summaries
+- Lead with answer, context after
+- Tool calls without announcement
+- Response length matched to question
+
+**Why opt-in (not default)**: terseness is a preference. Some users prefer the default explanatory style. Shipping it but requiring explicit activation keeps neutrality.
+
+## Why visibility matters architecturally
+
+Before v0.11, kaizen state was invisible until the user invoked a skill. The user couldn't tell:
+- Whether `/kaizen:finish` had run since last edit
+- Whether `pending.md` proposals were waiting
+- Which agent was active during a multi-second `/finish` run
+
+The visibility layer doesn't add new logic — it surfaces existing state. This is what makes kaizen feel **always-on** rather than **on-demand**.

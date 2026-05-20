@@ -1,0 +1,46 @@
+{
+  "_comment": "kaizen :: recommended MCP servers EXAMPLE. Reference for what to include in a real .mcp.json. Copy entries selectively into your project's .mcp.json (at project root, NOT in .claude/). Each server below adds capabilities to Claude Code when active; auth/setup notes are in docs/mcp-usage.md.",
+  "_docs": "https://code.claude.com/docs/en/mcp",
+
+  "mcpServers": {
+    "github": {
+      "_kaizen_purpose": "Read/write GitHub issues, PRs, files. Used by /kaizen:plan --from-issue and (future v0.11+) /kaizen:finish to open PRs with the suggested commit message.",
+      "_kaizen_priority": "high",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
+      }
+    },
+
+    "filesystem": {
+      "_kaizen_purpose": "Advanced file operations beyond what Read/Write/Glob already cover. Useful for cross-cutting refactors and large project navigation.",
+      "_kaizen_priority": "medium",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "${CLAUDE_PROJECT_DIR}"]
+    },
+
+    "playwright": {
+      "_kaizen_purpose": "Drive a real browser for E2E testing. Pairs with /kaizen:preflight in projects with browser-testable features (Vue/React/Svelte/Astro). v0.11+ may add a 'browser-test' check to /preflight when this MCP is detected.",
+      "_kaizen_priority": "high-for-web-projects",
+      "command": "npx",
+      "args": ["-y", "@playwright/mcp"]
+    },
+
+    "memory": {
+      "_kaizen_purpose": "Persistent cross-session knowledge graph. Complements Claude Code's built-in auto-memory; useful for project-specific facts that should survive /clear and reach across worktrees.",
+      "_kaizen_priority": "medium",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-memory"]
+    },
+
+    "sequential-thinking": {
+      "_kaizen_purpose": "Structured multi-step reasoning. Could integrate with /kaizen:plan for harder spec decompositions (v0.11+ option as `/plan --deep`).",
+      "_kaizen_priority": "low",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+    },
+
+    "_examples_below_not_yet_documented_in_kaizen": "Add per your project: sentry, linear, slack, notion, postgres, sqlite, etc. See https://github.com/modelcontextprotocol/servers for the official list."
+  }
+}

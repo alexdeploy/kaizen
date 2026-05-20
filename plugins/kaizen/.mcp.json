@@ -1,0 +1,6 @@
+{
+  "_comment": "kaizen :: plugin-level MCP servers. Intentionally empty in v0.10 — kaizen does NOT ship any MCP servers active by default. Adding entries here would activate them for every user of the kaizen plugin. For recommended MCPs (github, playwright, etc.) see .mcp.json.example and docs/mcp-usage.md.",
+  "_docs": "https://code.claude.com/docs/en/mcp",
+
+  "mcpServers": {}
+}
