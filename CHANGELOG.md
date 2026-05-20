@@ -20,6 +20,22 @@ While v0.x, **minor versions may include breaking changes**. From v1.0.0 onward,
 
 ---
 
+## [0.12.1] — 2026-05-20
+
+### Fixed
+- **`code-reviewer.md` brought up to v0.12 conventions** — was lingering with v0.1-era format:
+  - `description` now starts with "Use when the user asks for a comprehensive code review..." (auto-invocation pattern). Previously read "Reviews code for correctness, security..." which Claude rarely matched against user input → auto-invocation in general conversation didn't fire reliably.
+  - Added `<!-- kaizen-managed: true -->` marker. `/init --force` will now treat code-reviewer the same as the v0.12 ecosystem agents (overwrite if marker `true`, preserve if `false` or absent).
+  - Description now explicitly differentiates from sister agents ("For NARROWER concerns use the specialized agents instead — security-auditor for security-only, refactor-helper for restructure proposals, test-writer for missing tests").
+
+### Why this matters
+Without this fix, the v0.12 agent ecosystem had 6 well-behaved agents + 1 legacy agent that didn't auto-invoke. Users would get inconsistent behavior — Claude correctly picked test-writer / security-auditor / etc. for narrow requests but failed to pick code-reviewer for broader "review this code" requests, often handling them inline instead.
+
+### How it was caught
+Deterministic test suite run post-v0.12 release (frontmatter + description pattern + marker validation across all 7 agents). The 6 new agents passed; code-reviewer was the only one that didn't.
+
+---
+
 ## [0.12.0] — 2026-05-20
 
 ### The "Project Ecosystem" release
