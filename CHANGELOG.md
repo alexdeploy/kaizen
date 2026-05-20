@@ -11,11 +11,99 @@ While v0.x, **minor versions may include breaking changes**. From v1.0.0 onward,
 ## [Unreleased]
 
 ### Planned (backlog tracked in BACKLOG.md + TODO.md)
-- Hook implementations from `TODO.md "Hooks Implementation"` — `Stop`, `PreToolUse`, `SessionStart` enrichment, etc.
-- MCP integrations from `TODO.md "MCP Integration"` — `/kaizen:plan --from-issue` via GitHub MCP, `/preflight` browser-test via Playwright MCP, etc.
+- More hook implementations from `TODO.md "Hooks Implementation"`.
+- MCP integrations from `TODO.md "MCP Integration"`.
 - `/kaizen:bump --apply`.
-- `/kaizen:ci` skill (Phase 2 workflow initiative).
+- `/kaizen:ci` skill.
+- v0.13 agent ecosystem expansion: `migration-planner`, `performance-analyst`, possibly `api-designer`.
 - Other items in `BACKLOG.md`.
+
+---
+
+## [0.12.0] — 2026-05-20
+
+### The "Project Ecosystem" release
+
+Major shift in what `/kaizen:init --profile=advanced` produces. v0.11 and earlier wrote a thin `.claude/` with only one project-level agent (`code-reviewer`). v0.12 ships a full **project-level agent ecosystem** so Claude has orchestration available whenever the user talks to it in their project — not just when invoking kaizen skills.
+
+### Added — 6 project-level agents (advanced profile)
+
+Written to `<project>/.claude/agents/` by `/kaizen:init --profile=advanced`. Auto-invoked by Claude based on `description` field matching. All are read-only except `test-writer`, `refactor-helper`, `documentation-writer` (which write code per their job).
+
+| Agent | Use when | Tools |
+|---|---|---|
+| `test-writer` | User adds new functionality without tests, or asks to write tests | Read, Write, Edit, Glob, Grep, Bash |
+| `refactor-helper` | User wants to restructure without changing behavior | Read, Write, Edit, Glob, Grep, Bash |
+| `documentation-writer` | User asks to write/update docs (README, docstrings, CHANGELOG) | Read, Write, Edit, Glob, Grep, Bash |
+| `dependency-auditor` | User asks about deps, outdated packages, vulnerabilities | Read, Glob, Grep, Bash |
+| `security-auditor` | User wants broad security review (auth, payments, data handling) | Read, Grep, Glob, Bash |
+| `architecture-advisor` | User asks design questions, "should I use X or Y" | Read, Grep, Glob |
+
+**Distinct from plugin-level agents** (`preflight-security`, `commit-suggester`, `versioner`, etc.). Plugin agents serve kaizen skills with narrow scope and "Invoked by /X" descriptions. Project agents serve general conversation with "Use when X happens" descriptions optimized for Claude's auto-invocation.
+
+### Added — 2 project-level hooks (advanced profile)
+
+Written to `<project>/.claude/hooks/` by `--profile=advanced` and wired into `.claude/settings.json`:
+
+| Hook | Event | Behavior |
+|---|---|---|
+| `secret-detector.sh` | `PreToolUse(Edit|Write)` | Scans intended file content for likely secrets (AWS keys, GitHub PATs, JWTs, private keys, credential-shaped assignments). **Exit 2 BLOCKS** the write with explanation. Same-line `noqa: secret` markers escape false positives. |
+| `dependency-changed.sh` | `PostToolUse(Edit|Write)` | Self-filters to manifest files (package.json, pyproject.toml, Cargo.toml, etc.). When one changes, prints an informational suggestion to invoke `@dependency-auditor` or run audit commands. Does NOT run audit itself. |
+
+### Added — KAIZEN_ENRICH directive registry expansion (9 new directives)
+
+To support per-stack agent customization without duplicating templates:
+
+- `test_writer_description`, `test_runner_conventions`, `project_test_patterns` (for `test-writer.md`)
+- `refactor_safety_checks` (for `refactor-helper.md`)
+- `doc_format_conventions`, `project_doc_locations` (for `documentation-writer.md`)
+- `dep_manager_commands` (for `dependency-auditor.md`)
+- `stack_security_concerns` (for `security-auditor.md`)
+- `detected_architecture_patterns`, `project_principles` (for `architecture-advisor.md`)
+
+Each agent template uses these markers; `/init` fills them per detected stack + project state.
+
+### Added — `kaizen-managed` marker for drift management
+
+Each `/init`-generated agent file contains as the first body line:
+
+```html
+<!-- kaizen-managed: true (re-init may overwrite — change to `false` or delete this line to claim ownership) -->
+```
+
+On `/kaizen:init --force`:
+- If existing agent has `kaizen-managed: true` → overwrite (kaizen owns it).
+- If `false` OR marker absent → preserve + log notice in drift report.
+
+Lets users customize agents (set marker to false) without losing changes on re-init.
+
+### Profile system clarification
+
+The `advanced` profile is now **meaningfully different** from `standard`. Concrete differences:
+
+| Profile | Files generated |
+|---|---|
+| `minimal` | Base only (CLAUDE.md, settings, 1 rule, code-reviewer, 3 hooks) |
+| `standard` (default) | Minimal + workflow.md rule + Workflow section in CLAUDE.md |
+| `advanced` | Standard + **6 new agents** + **2 new hooks** + kaizen-terse output style + workflow-advanced.md + Versioning + Output style sections in CLAUDE.md |
+
+A fresh `/init --profile=advanced` now writes ~16 files (vs ~8 for minimal). Significant — document well in user-manual.
+
+### Conceptual clarification
+
+**Before v0.12** there was conceptual confusion: kaizen's plugin agents (preflight-security, versioner, etc.) are invoked BY kaizen skills, not by Claude in general conversation. Users with kaizen installed didn't get a broader agent ecosystem for their general work.
+
+**v0.12 separates concerns**:
+- Plugin agents = kaizen's internal workers (called by /preflight, /finish, /plan, etc.)
+- Project agents = user's general-purpose ecosystem (auto-invoked by Claude as you work)
+
+The two coexist without conflict — plugin agents have skill-tuned descriptions; project agents have auto-invocation-tuned descriptions.
+
+### Notes
+- Pure additive: existing `--profile=minimal`/`standard` outputs unchanged.
+- `--profile=advanced` output IS bigger than before (6 more agents, 2 more hooks). Users running `/init --force` on existing advanced setups will see the new files written.
+- The `kaizen-managed` marker is new but only matters on `--force` (no breaking change for non-force runs).
+- v0.13 will likely add `migration-planner`, `performance-analyst`, and possibly `api-designer` to the ecosystem.
 
 ---
 

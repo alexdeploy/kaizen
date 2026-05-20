@@ -1287,3 +1287,132 @@ Before v0.11, kaizen state was invisible until the user invoked a skill. The use
 - Which agent was active during a multi-second `/finish` run
 
 The visibility layer doesn't add new logic — it surfaces existing state. This is what makes kaizen feel **always-on** rather than **on-demand**.
+
+---
+
+# 19. Project agent ecosystem (v0.12.0+)
+
+> v0.6-v0.11 built kaizen's **skill set**. v0.12 adds a layer the user's project owns: **6 project-level agents** that Claude can auto-invoke during general conversation. This is the conceptual shift from "kaizen as a set of skills" to "kaizen as a dev environment scaffolder".
+
+## The two-layer agent architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  KAIZEN PLUGIN (kaizen's tools)                             │
+│  plugins/kaizen/agents/                                      │
+│    preflight-security, commit-suggester, plan-context,       │
+│    plan-decomposer, docs-keeper, versioner                   │
+│                                                              │
+│  Used by: kaizen skills (/preflight, /finish, /plan, ...)   │
+│  Description style: "Invoked by /kaizen:X. ..."             │
+│  Updated via: kaizen plugin releases                         │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│  USER'S PROJECT (user's tools)                              │
+│  <project>/.claude/agents/                                   │
+│    code-reviewer (all profiles)                              │
+│    + 6 new (advanced profile):                               │
+│    test-writer, refactor-helper, documentation-writer,       │
+│    dependency-auditor, security-auditor, architecture-advisor│
+│                                                              │
+│  Used by: Claude during general conversation (auto-invoke)  │
+│  Description style: "Use when X happens. ..."                │
+│  Updated via: /kaizen:init --force (kaizen-managed marker)  │
+└─────────────────────────────────────────────────────────────┘
+```
+
+The two layers **don't conflict in practice**: plugin agents have skill-tuned descriptions Claude won't auto-invoke; project agents have auto-invocation-tuned descriptions.
+
+## Why this design
+
+v0.11 had a conceptual gap: kaizen-installed projects only got **one** project-level agent (`code-reviewer`). Anything else required invoking a kaizen skill. v0.12 closes the gap — Claude has tools available naturally, without the user knowing kaizen vocabulary.
+
+| Before v0.12 | After v0.12 (`--profile=advanced`) |
+|---|---|
+| User: "audit our auth" → Claude does it raw (no specialized agent) | User: "audit our auth" → Claude auto-invokes `security-auditor` |
+| User: "write tests for this" → Claude writes them generically | User: "write tests for this" → Claude auto-invokes `test-writer` which knows project's test patterns |
+| User: "should I use X or Y" → Claude opines without project context | User: "should I use X or Y" → Claude auto-invokes `architecture-advisor` which knows project's principles |
+
+## Stack adaptation via KAIZEN_ENRICH
+
+The 6 agents are **template files with markers** in `templates/_shared/.claude/agents/`. At `/init` time, kaizen fills the markers per detected stack:
+
+| Marker | Where | What |
+|---|---|---|
+| `{{STACK_FRIENDLY}}` | Throughout each agent body | Substitution (e.g., "TypeScript / Vue 3 / Quasar") |
+| `KAIZEN_ENRICH:test_writer_description` | `test-writer.md` description field | Stack-aware auto-invocation hint |
+| `KAIZEN_ENRICH:test_runner_conventions` | `test-writer.md` body | Vitest/pytest/etc. conventions |
+| `KAIZEN_ENRICH:project_test_patterns` | `test-writer.md` body | Patterns from actual test files in repo |
+| `KAIZEN_ENRICH:refactor_safety_checks` | `refactor-helper.md` body | tests + typecheck commands per stack |
+| `KAIZEN_ENRICH:doc_format_conventions` | `documentation-writer.md` body | TSDoc/Google docstrings/etc. |
+| `KAIZEN_ENRICH:project_doc_locations` | `documentation-writer.md` body | Verified existing doc paths |
+| `KAIZEN_ENRICH:dep_manager_commands` | `dependency-auditor.md` body | `npm audit` / `pip-audit` / `cargo audit` |
+| `KAIZEN_ENRICH:stack_security_concerns` | `security-auditor.md` body | Stack-relevant OWASP concerns |
+| `KAIZEN_ENRICH:detected_architecture_patterns` | `architecture-advisor.md` body | Inferred pattern (layered, feature-based, etc.) |
+| `KAIZEN_ENRICH:project_principles` | `architecture-advisor.md` body | Pulled from CLAUDE.md conventions |
+
+Same machinery used for `CLAUDE.md`. No new infrastructure — just more directives in the registry.
+
+## `kaizen-managed` marker — drift management
+
+Each generated agent's body starts with:
+
+```html
+<!-- kaizen-managed: true (re-init may overwrite — change to `false` or delete this line to claim ownership) -->
+```
+
+On `/kaizen:init --force`:
+- `kaizen-managed: true` → overwrite (kaizen owns it)
+- `kaizen-managed: false` OR absent → preserve + log notice
+
+The marker is the user's signal: "I customized this — don't touch". Without the marker mechanic, every kaizen release would either lose user customizations OR fail to deliver agent updates. The marker resolves the tension.
+
+## Hooks complementing the agents
+
+Two hooks complete the v0.12 advanced profile:
+
+- **`secret-detector.sh`** (PreToolUse) — blocks writes containing likely secrets. Patterns: AWS keys, GitHub PATs, JWTs, private keys, credential-shaped assignments with high-entropy values. Same-line `noqa: secret` markers escape false positives.
+- **`dependency-changed.sh`** (PostToolUse) — self-filters to manifest files; on change, prints a one-line suggestion ("consider `@dependency-auditor`"). Doesn't run audit itself (decoupled).
+
+Both wired into `.claude/settings.json` ONLY for `--profile=advanced`. Minimal/standard profiles don't reference scripts they don't have.
+
+## Why advisory (not gating) for some agents
+
+Notice: agents like `dependency-auditor` and `security-auditor` are read-only by design. They surface findings; they don't fix. Same contract as `/kaizen:analyze` and `/kaizen:preflight`.
+
+Reasoning: dependency updates and security fixes are decisions the user owns. Auto-fixing security issues at the agent level would (a) violate the read-only contract, (b) risk wrong fixes, (c) bypass code review. The agent's job is to make the issues visible; the user (or another agent like `refactor-helper`) implements the fix.
+
+## What the user sees after `/init --profile=advanced`
+
+```
+✓ kaizen init complete (v0.12.0)
+
+Profile: advanced
+Stack: TypeScript / Vue 3 / Quasar
+
+Files created:
+  - CLAUDE.md (74 lines — includes Workflow + Agent ecosystem + Output style + Versioning sections)
+  - .claude/settings.json (with statusLine + 4 hooks wired)
+  - .claude/settings.local.json.example
+  - .claude/rules/testing.md
+  - .claude/rules/workflow.md
+  - .claude/rules/workflow-advanced.md
+  - .claude/agents/code-reviewer.md
+  - .claude/agents/test-writer.md            ← v0.12+
+  - .claude/agents/refactor-helper.md         ← v0.12+
+  - .claude/agents/documentation-writer.md    ← v0.12+
+  - .claude/agents/dependency-auditor.md      ← v0.12+
+  - .claude/agents/security-auditor.md        ← v0.12+
+  - .claude/agents/architecture-advisor.md    ← v0.12+
+  - .claude/hooks/session-start.sh
+  - .claude/hooks/format-on-save.sh
+  - .claude/hooks/statusline.sh
+  - .claude/hooks/secret-detector.sh          ← v0.12+
+  - .claude/hooks/dependency-changed.sh       ← v0.12+
+  - .claude/output-styles/kaizen-terse.md
+
+Customizations applied: ...
+```
+
+This is a substantial scaffold (~19 files). The user gets an opinionated, working dev environment in one command.

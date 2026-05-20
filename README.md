@@ -3,7 +3,9 @@
 > 改善 (kaizen) = continuous improvement.
 > A Claude Code plugin that scaffolds a complete, adapted `.claude/` setup for any project — empty or existing — and (in future versions) evolves it as the project grows.
 
-## What it does today (v0.11.0)
+## What it does today (v0.12.0)
+
+`/kaizen:init --profile=advanced` now scaffolds a **project-level agent ecosystem** — 6 agents in `<project>/.claude/agents/` that Claude auto-invokes during general conversation (not just when invoking kaizen skills). Plus 2 new hooks (secret-detector + dependency-changed).
 
 **8 skills**, **6 plugin-level agents**, and a **profile system** for `/init`:
 
@@ -15,6 +17,21 @@
 - `/kaizen:docs` — surfaces user-facing documentation gaps from recent changes via the `docs-keeper` agent. Read-only.
 - `/kaizen:bump` — suggests semver bump (major/minor/patch) via the `versioner` agent. Detects changesets. Supports JS/TS, Python, Rust.
 - `/kaizen:finish` — **end-of-task orchestrator**. Chains deterministic checks + 4 parallel agents (security + commit + bump + docs) into a unified verdict and per-concern guidance.
+
+## Project agent ecosystem (v0.12+, `--profile=advanced`)
+
+| Agent | Use when (auto-invocation) |
+|---|---|
+| `test-writer` | New code without tests, or "write tests for X" |
+| `refactor-helper` | "Refactor X without changing behavior" |
+| `documentation-writer` | "Write/update docs (README, docstrings, CHANGELOG)" |
+| `dependency-auditor` | "Audit deps", "any outdated packages?", "vulnerabilities?" |
+| `security-auditor` | "Security review of auth/payments/data layer" — broader than per-diff |
+| `architecture-advisor` | "Should I use X or Y?", "does this fit the architecture?" |
+
+Plus `code-reviewer` (already shipped) for comprehensive review on demand.
+
+All marked with `kaizen-managed: true` so `--force` re-init can update them. Change to `false` to claim ownership.
 
 ## Visibility (v0.11+)
 

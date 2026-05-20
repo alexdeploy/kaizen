@@ -84,6 +84,90 @@ Templates may contain HTML-comment markers like `<!-- KAIZEN_ENRICH:<id> -->`. E
 - Use the actual version from `package.json` (`^5.0.0` becomes `v5.0.0`).
 - If `package.json` has no relevant entries, replace the marker with a single comment: `<!-- No additional frameworks detected -->`.
 
+### `test_writer_description` (v0.12+ — agent ecosystem, advanced profile only)
+
+**Location**: in `description:` field of `.claude/agents/test-writer.md`.
+
+**Action**: produce a one-sentence description tuned to the stack so Claude can auto-invoke correctly. Format: `"Use when adding new functionality to write <runner> tests for it. <Project-specific runner note if any>."`
+
+Examples:
+- TypeScript/Vitest: `"Use when adding new functionality to write Vitest tests for it. Uses Vue Test Utils for component tests."`
+- Python/pytest: `"Use when adding new functionality to write pytest tests for it. Mocks via pytest-mock fixtures."`
+- Generic: `"Use when adding new functionality to write tests for it. Match the project's existing test style."`
+
+### `test_runner_conventions` (v0.12+ — agent ecosystem)
+
+**Location**: under `## Test runner conventions for this project` in `test-writer.md`.
+
+**Action**: 3-6 bullets covering the test runner specifics — file naming, location, mocking pattern, common imports per stack.
+
+### `project_test_patterns` (v0.12+ — agent ecosystem)
+
+**Location**: under `## Patterns observed in this codebase` in `test-writer.md`.
+
+**Action**: Glob `**/*.test.*` (or stack equivalent). Read 2-3 sample test files. Extract patterns: imports, mocking style, setup/teardown idiom, naming convention. If no existing tests: write `(no existing tests detected; match the conventions in .claude/rules/testing.md)`. Max 8 bullets.
+
+### `refactor_safety_checks` (v0.12+ — agent ecosystem)
+
+**Location**: under `## Safety checks per stack` in `refactor-helper.md`.
+
+**Action**: list commands that must pass after a refactor:
+- TS: `{{PACKAGE_MANAGER}} test && {{PACKAGE_MANAGER}} run typecheck`
+- Python: `pytest && mypy .` (only those that exist)
+- Rust: `cargo test && cargo check`
+- Generic: `<the project's test command>` + `<typecheck if any>`
+
+### `doc_format_conventions` (v0.12+ — agent ecosystem)
+
+**Location**: under `## Documentation conventions for this project` in `documentation-writer.md`.
+
+**Action**: 3-5 bullets covering doc style per stack (TSDoc/JSDoc, Google/NumPy docstrings, etc.). For generic stack write "no detected convention — follow language idiom".
+
+### `project_doc_locations` (v0.12+ — agent ecosystem)
+
+**Location**: under `## Locations where docs live in this project` in `documentation-writer.md`.
+
+**Action**: list ACTUAL paths where docs exist (verify with `test -f`/`test -d`): `README.md`, `docs/`, `ARCHITECTURE.md`, `CHANGELOG.md`. Don't list what's absent.
+
+### `dep_manager_commands` (v0.12+ — agent ecosystem)
+
+**Location**: under `## Commands for this project` in `dependency-auditor.md`.
+
+**Action**: list audit/outdated commands per package manager:
+- npm: `npm audit`, `npm outdated`
+- pnpm: `pnpm audit`, `pnpm outdated`
+- Python pip: `pip-audit` (if installed), `pip list --outdated`
+- Rust: `cargo audit` (if installed), `cargo outdated` (if installed)
+- Generic: state "list the audit commands for your stack manually"
+
+### `stack_security_concerns` (v0.12+ — agent ecosystem)
+
+**Location**: under `## Common concerns for this stack` in `security-auditor.md`.
+
+**Action**: 4-6 bullets of stack-relevant security concerns:
+- Web frontend (Vue/React/Svelte): XSS via v-html/dangerouslySetInnerHTML, CSRF, CORS, CSP
+- Backend Node: SQL injection, prototype pollution, ReDoS, command injection
+- Python: pickle deserialization, SQL injection via string formatting, yaml.load unsafe
+- Generic: surface "OWASP Top 10 applicable to your stack"
+
+### `detected_architecture_patterns` (v0.12+ — agent ecosystem)
+
+**Location**: under `## Detected architecture patterns in this project` in `architecture-advisor.md`.
+
+**Action**: characterize the architecture pattern based on `src/*/` layout:
+- "Layered: pages → stores → services" (Vue/SPA)
+- "Feature-based: each feature owns components/state/api"
+- "MVC-ish: controllers + models + views"
+- "(no clear pattern detected — flat or mixed)"
+
+3-5 bullets max.
+
+### `project_principles` (v0.12+ — agent ecosystem)
+
+**Location**: under `## Stated project principles (from CLAUDE.md)` in `architecture-advisor.md`.
+
+**Action**: extract principles from CLAUDE.md's `## Conventions` and `## Never do` sections. Format as bullets. If absent, write `(no explicit principles documented yet — add them to CLAUDE.md to enable better advice)`.
+
 ### `architecture_layout`
 
 **Location**: inside `## Architecture (brief)` section of `CLAUDE.md`.
@@ -170,6 +254,22 @@ If `detect.existing_claude_config` is non-empty AND `--force` is NOT in `$ARGUME
 - Ask: "I found existing Claude config (`<list>`). Options: (a) abort, (b) re-run with `--force`, (c) merge only missing pieces. Which?"
 - If (c), proceed but only write files that don't exist yet.
 
+#### `kaizen-managed` marker (v0.12+ — agent ecosystem)
+
+Project-level agent files (`.claude/agents/*.md`) written by `/init` `advanced` profile contain this marker as the **first line of the body** (after frontmatter):
+
+```html
+<!-- kaizen-managed: true (re-init may overwrite — change to `false` or delete this line to claim ownership) -->
+```
+
+**On `--force`**, for each project-level agent file that already exists, check the marker:
+- If `kaizen-managed: true` → **overwrite** (kaizen owns it).
+- If `kaizen-managed: false` OR the marker is absent → **skip** + log notice: `"preserved <path> (user-customized — marker absent or false)"`.
+
+This lets users claim ownership of an agent (customize it, change marker to `false`) without losing their changes on `/init --force`. Document in the drift report which agents were overwritten vs preserved.
+
+This only applies to `--force` runs; without `--force` the standard existing-config guard above runs first.
+
 ### 3. Branch on maturity
 
 | maturity | behavior |
@@ -244,11 +344,52 @@ Append to `CLAUDE.md` a new `## Workflow` section that lists the kaizen skills (
 If `--profile=advanced`, **additionally** generate:
 
 ```
-.claude/rules/workflow-advanced.md       # adds the end-of-task ritual: run /kaizen:finish before every commit
-.claude/output-styles/kaizen-terse.md    # v0.11+ opt-in output style — terse responses, no preambles
+.claude/rules/workflow-advanced.md         # end-of-task ritual: run /kaizen:finish before every commit
+.claude/output-styles/kaizen-terse.md      # v0.11+ opt-in output style — terse responses
+
+# v0.12+ agent ecosystem (6 new project-level agents) — auto-invoked by Claude based on description match:
+.claude/agents/test-writer.md
+.claude/agents/refactor-helper.md
+.claude/agents/documentation-writer.md
+.claude/agents/dependency-auditor.md
+.claude/agents/security-auditor.md
+.claude/agents/architecture-advisor.md
+
+# v0.12+ additional hooks:
+.claude/hooks/secret-detector.sh           # PreToolUse: scans intended writes for likely secrets, exit 2 blocks
+.claude/hooks/dependency-changed.sh        # PostToolUse: informational nudge when manifest files change
 ```
 
+For each agent file, **apply the relevant KAIZEN_ENRICH directives** (see the directive registry above — `test_writer_description`, `test_runner_conventions`, `project_test_patterns`, `refactor_safety_checks`, `doc_format_conventions`, `project_doc_locations`, `dep_manager_commands`, `stack_security_concerns`, `detected_architecture_patterns`, `project_principles`).
+
+The agent files contain a `<!-- kaizen-managed: true ... -->` marker at the top of the body. Don't strip it.
+
+Append to `CLAUDE.md` a `## Agent ecosystem` section (5-8 lines) listing the 6 new agents + their auto-invocation triggers (one-line per). This is the user's primary documentation of what Claude has available.
+
 Append to `CLAUDE.md` a `## Output style` section (short, ~3 lines): mention that `kaizen-terse` is shipped at `.claude/output-styles/kaizen-terse.md` and can be activated by setting `"outputStyle": "kaizen-terse"` in `.claude/settings.json` (or via `/output-style` if Claude Code version supports interactive selection).
+
+After writing the 2 new hook scripts, run `chmod +x` on each.
+
+**Then inject the hook wiring** into the just-written `.claude/settings.json`. Add to the `hooks` object:
+
+```json
+"PreToolUse": [
+  {
+    "matcher": "Edit|Write",
+    "hooks": [
+      { "type": "command", "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/secret-detector.sh" }
+    ]
+  }
+]
+```
+
+And add a second handler to the existing `PostToolUse` `Edit|Write` matcher (alongside format-on-save):
+
+```json
+{ "type": "command", "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/dependency-changed.sh" }
+```
+
+These hook wirings are **only** added when `--profile=advanced` — the templates ship without them so minimal/standard profiles don't reference scripts they don't have.
 
 Append to `CLAUDE.md` a `## Versioning` section adapted to the stack:
 - JS/TS with detected `.changeset/` → recommend changesets workflow

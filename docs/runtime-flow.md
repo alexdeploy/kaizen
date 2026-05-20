@@ -1733,3 +1733,106 @@ The style is fixed at session start — changes take effect on the **next** sess
 | Output style activation | Yes — same setting = same behavior |
 
 All three are stateless / read-only. They surface state; they don't create or modify it.
+
+---
+
+# 19. Project agent ecosystem runtime (v0.12.0+)
+
+## 19.1 Two-layer agent dispatch — how Claude picks an agent
+
+```mermaid
+flowchart TD
+    User[User says something to Claude] --> Match{Does any agent's<br/>description match?}
+
+    Match -->|matches PROJECT agent<br/>'use when X happens'| ProjAgent[Auto-invoke project agent<br/>.claude/agents/X.md]
+    Match -->|matches PLUGIN agent<br/>(rare — skill-tuned descriptions)| PluginAgent[Auto-invoke plugin agent]
+    Match -->|no match| Inline[Claude handles inline<br/>without subagent]
+
+    ProjAgent --> Work[Agent runs in own context]
+    PluginAgent --> Work
+    Inline --> Work
+
+    classDef proj fill:#dbeafe,stroke:#2563eb;
+    classDef plug fill:#fef3c7,stroke:#ca8a04;
+    class ProjAgent proj;
+    class PluginAgent plug;
+```
+
+In practice: plugin agents rarely auto-invoke (their descriptions are "Invoked by /kaizen:X"). Project agents do (their descriptions are "Use when X happens"). User can always @-mention either explicitly.
+
+## 19.2 Which agent gets which task
+
+```mermaid
+flowchart LR
+    UserAsk[User input] --> Type{User asking?}
+    Type -->|review this code| CR[code-reviewer]
+    Type -->|write tests| TW[test-writer]
+    Type -->|refactor without behavior change| RH[refactor-helper]
+    Type -->|write/update docs| DW[documentation-writer]
+    Type -->|audit deps| DA[dependency-auditor]
+    Type -->|broad security review| SA[security-auditor]
+    Type -->|design question| AA[architecture-advisor]
+```
+
+## 19.3 `--force` with `kaizen-managed` marker
+
+```mermaid
+flowchart TD
+    Start[/kaizen:init --force/] --> ForEach{For each agent file<br/>kaizen would write}
+
+    ForEach --> Exists{File exists?}
+    Exists -->|no| Write[Write the file]
+    Exists -->|yes| Read[Read existing file]
+
+    Read --> CheckMarker{kaizen-managed marker?}
+    CheckMarker -->|true| Overwrite[Overwrite<br/>log: updated kaizen-managed]
+    CheckMarker -->|false or absent| Preserve[Skip<br/>log: preserved user-customized]
+
+    Write --> Done
+    Overwrite --> Done
+    Preserve --> Done([drift summary])
+
+    classDef ok fill:#dcfce7,stroke:#16a34a;
+    classDef warn fill:#fef3c7,stroke:#ca8a04;
+    class Write,Overwrite ok;
+    class Preserve warn;
+```
+
+## 19.4 secret-detector hook flow
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Claude
+    participant Edit as Edit/Write tool
+    participant Hook as secret-detector.sh
+
+    Claude->>Edit: invoke (file_path, content)
+    Edit->>Hook: PreToolUse fires with payload on stdin
+    Hook->>Hook: extract content + file_path
+    Hook->>Hook: skip if .env.example / generated dirs
+    Hook->>Hook: strip 'noqa: secret' lines
+    Hook->>Hook: regex scan (AWS keys, PATs, JWTs, etc.)
+
+    alt Secret detected
+        Hook-->>Edit: exit 2 + stderr explanation
+        Edit-->>Claude: BLOCKED
+        Claude->>Claude: surface to user, doesn't write
+    else No secrets
+        Hook-->>Edit: exit 0
+        Edit->>Edit: proceed with write
+    end
+```
+
+`exit 2` is the only mechanism that blocks. Same-line `noqa: secret` marker escapes the check.
+
+## 19.5 Idempotency
+
+| Action | Idempotent? |
+|---|---|
+| Agent auto-invocation | Yes — same input gives similar output (LLM variance) |
+| `/init --profile=advanced` (first run) | Yes |
+| `/init --force` after customization (marker=false) | Yes — preserves customized files |
+| `/init --force` no customization (marker=true) | Yes — overwrites |
+| `secret-detector.sh` invocation | Yes — pure read + regex |
+| `dependency-changed.sh` invocation | Yes — pure check + log line |

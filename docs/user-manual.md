@@ -62,7 +62,7 @@ You'll see Claude run `detect.sh`, report what it found, and either generate fil
 
 ## Command reference
 
-Commands shipped in v0.11.0 (same 8 skills as v0.10.0 + visibility layer):
+Commands shipped in v0.12.0 (same 8 skills as v0.11 + agent ecosystem in `advanced` profile):
 - [`/kaizen:init`](#kaizeninit-arguments) — bootstrap project config (with `--profile` system)
 - [`/kaizen:learn`](#kaizenlearn-arguments) — propose config updates from git activity
 - [`/kaizen:analyze`](#kaizenanalyze-arguments) — read-only audit of code vs. stated rules
@@ -912,6 +912,65 @@ What it enforces:
 Uses `keep-coding-instructions: true` so default software-engineering task instructions stay intact — only the terseness layer is added.
 
 Return to default by setting `"outputStyle": "default"` or removing the key.
+
+## Project agent ecosystem (v0.12+, `--profile=advanced`)
+
+When you run `/kaizen:init --profile=advanced`, kaizen writes 6 project-level agents to `<project>/.claude/agents/`. These are **distinct from kaizen's plugin agents** — they're yours, customizable, and Claude auto-invokes them based on what you ask for in conversation.
+
+### The 6 agents and when each gets used
+
+| Agent | Auto-invocation triggers | Read-only? |
+|---|---|---|
+| `test-writer` | "Write tests for X"; new functionality added without tests | No (writes test files) |
+| `refactor-helper` | "Refactor X to Y"; "extract this into a helper"; "deduplicate this" | No (modifies code per the refactor) |
+| `documentation-writer` | "Write a README section about X"; "add docstrings"; "update CHANGELOG" | No (writes docs) |
+| `dependency-auditor` | "Audit deps"; "any outdated packages?"; "vulnerabilities?" | **Yes** — runs audit tools, never installs/updates |
+| `security-auditor` | "Audit security of the auth system"; "review payments for security" | **Yes** — read-only, surfaces findings |
+| `architecture-advisor` | "Should I use X or Y?"; "does this fit the architecture?" | **Yes** — advises, never writes code |
+
+Plus `code-reviewer` (shipped in all profiles) for comprehensive review on demand.
+
+### How they differ from plugin-level agents
+
+| Plugin agents (used by kaizen skills) | Project agents (used by Claude generally) |
+|---|---|
+| `preflight-security`, `commit-suggester`, `versioner`, `docs-keeper`, `plan-context`, `plan-decomposer` | `code-reviewer`, `test-writer`, `refactor-helper`, `documentation-writer`, `dependency-auditor`, `security-auditor`, `architecture-advisor` |
+| Live in plugin tree (`plugins/kaizen/agents/`) | Live in project (`<project>/.claude/agents/`) |
+| Invoked by kaizen skills (`/preflight`, `/finish`, etc.) | Auto-invoked by Claude based on conversation |
+| You CAN'T customize easily | You CAN customize (it's your project) |
+| Scope tuned to skill flow ("Invoked by /X") | Scope tuned to general use ("Use when X happens") |
+| Updates ship via kaizen plugin releases | Updates via `/kaizen:init --force` (controlled by kaizen-managed marker) |
+
+### The `kaizen-managed` marker
+
+Each project agent starts with this line in its body:
+
+```html
+<!-- kaizen-managed: true (re-init may overwrite — change to `false` or delete this line to claim ownership) -->
+```
+
+**On `/kaizen:init --force`**:
+- `kaizen-managed: true` → kaizen overwrites the file (you get the latest version).
+- `kaizen-managed: false` OR marker absent → kaizen preserves your file (you customized it).
+
+Want to customize an agent and keep it across kaizen updates? Edit the file, change `true` to `false` (or just delete the line). Want to revert to kaizen's version? Re-run `/kaizen:init --force` and the marker decides.
+
+### Stack adaptation
+
+Agent descriptions and stack-specific sections (test runner conventions, security concerns, dep manager commands, etc.) are filled at `/init` time per the detected stack. Run on a Python project → docs-writer knows about Google docstrings; on a TS project → it knows TSDoc.
+
+This uses the same KAIZEN_ENRICH marker system as `CLAUDE.md`. See the agent file body for which markers fill which sections.
+
+### Additional hooks (advanced profile)
+
+Two new hooks complement the agent ecosystem:
+
+| Hook | Event | What it does |
+|---|---|---|
+| `secret-detector.sh` | `PreToolUse` on Edit/Write | Scans intended content for likely secrets (AWS keys, GitHub PATs, JWTs, etc.). **Blocks the write** (exit 2) if found. Same-line `noqa: secret` marker bypasses |
+| `dependency-changed.sh` | `PostToolUse` on Edit/Write | Self-filters to manifest files. When `package.json`/`pyproject.toml`/`Cargo.toml`/etc. changes, suggests invoking `@dependency-auditor` or running audit commands |
+
+These are wired into `.claude/settings.json` only for `--profile=advanced`.
 
 ## Troubleshooting
 

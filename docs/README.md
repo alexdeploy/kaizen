@@ -75,7 +75,7 @@ Welcome. This folder documents how the kaizen plugin behaves **once it's install
 
 ## Version
 
-This documentation tracks kaizen **v0.11.0** — adds visibility layer (statusline + subagent statusline + opt-in output style) on top of v0.10's advanced workflow scaffold. 8 skills + 6 plugin-level agents + profile system + visibility surface. Currently shipped commands:
+This documentation tracks kaizen **v0.12.0** — the "Project Ecosystem" release. `--profile=advanced` now scaffolds 6 project-level agents + 2 new hooks for Claude to auto-orchestrate during general conversation in any project. 8 skills + 6 plugin-level agents + 7 project-level agents (advanced) + profile system + visibility surface. Currently shipped commands:
 
 - `/kaizen:init` — bootstrap (covered in detail throughout these docs)
 - `/kaizen:learn` — propose CLAUDE.md updates from git activity (see [user-manual.md](./user-manual.md#kaizenlearn-arguments))
