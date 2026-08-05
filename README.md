@@ -17,6 +17,27 @@
 - `/kaizen:docs` — surfaces user-facing documentation gaps from recent changes via the `docs-keeper` agent. Read-only.
 - `/kaizen:bump` — suggests semver bump (major/minor/patch) via the `versioner` agent. Detects changesets. Supports JS/TS, Python, Rust.
 - `/kaizen:finish` — **end-of-task orchestrator**. Chains deterministic checks + 4 parallel agents (security + commit + bump + docs) into a unified verdict and per-concern guidance.
+- `/kaizen:upgrade` — **(unreleased, `next` branch)** updates a project's generated config to the current plugin version **without overwriting your customisations**. Uses the lock file to tell untouched files from edited ones, and `git merge-file` for the rest. Plans before it writes. See [Configuration lock](#configuration-lock).
+
+## Configuration lock
+
+`/kaizen:init` records exactly what it wrote — a hash per file in
+`.claude/kaizen/lock.json`, plus a verbatim snapshot under
+`.claude/kaizen/baseline/`. Both are meant to be **committed**, like
+`package-lock.json`.
+
+That record is what turns updating from a gamble into an operation:
+
+| Your file | kaizen knows | On `/kaizen:upgrade` |
+|---|---|---|
+| Untouched since generation | hash matches the lock | Replaced silently with the new version |
+| You edited it | hash differs | **3-way merged** — your edits and the new template both survive; genuine collisions are shown, never auto-resolved |
+| You deleted it | recorded but absent | Left deleted |
+| kaizen never wrote it | not in the lock | Never touched |
+
+Before the lock, the only update path was `--force`, which overwrites. The lock
+is what makes "keeps improving without breaking anything" a mechanism rather
+than a promise.
 
 ## Project agent ecosystem (v0.12+, `--profile=advanced`)
 

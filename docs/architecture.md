@@ -1416,3 +1416,151 @@ Customizations applied: ...
 ```
 
 This is a substantial scaffold (~19 files). The user gets an opinionated, working dev environment in one command.
+
+---
+
+# 17. The configuration lock + `/kaizen:upgrade` runtime (unreleased — `next` branch)
+
+> Every skill up to this point either generates config or reads it. This one
+> **updates** it, which is a categorically harder problem: the file kaizen wants
+> to change is a file the user may have made their own.
+
+## The problem it solves
+
+Before the lock, kaizen had exactly two answers to "the templates improved,
+what about existing projects?":
+
+1. `--force` — overwrite. Destroys customisations.
+2. Nothing — leave the project on whatever it got the day it was initialised.
+
+Both are wrong, and the second is why scaffolders get run once and abandoned.
+The missing capability was not merging; it was **knowing**. kaizen could not
+tell "the user never touched this file" from "the user rewrote it", because it
+kept no record of what it had produced.
+
+## The record
+
+`/kaizen:init` step 7 calls `kaizen-lock write`, which produces two artifacts:
+
+```
+.claude/kaizen/
+├── lock.json          ← what was written, by which plugin version, with what hash
+└── baseline/          ← a verbatim copy of each generated file
+    ├── CLAUDE.md
+    └── .claude/...
+```
+
+```json
+{
+  "lock_version": 1,
+  "generated": "2026-08-05T21:19:19Z",
+  "plugin_version": "0.13.0",
+  "standards_version": "unset",
+  "profile": "standard",
+  "preset": "typescript-node",
+  "files": [
+    { "path": "CLAUDE.md", "sha256": "173f954c…" }
+  ]
+}
+```
+
+**Both are meant to be committed.** They are the project's record of its own
+configuration provenance, exactly like `package-lock.json`. This is why the
+`.gitignore` template ignores `.claude/kaizen/*` but negates `lock.json` and
+`baseline/` — the reports and plans are transient, the lock is not.
+
+The hash answers "did the user change this?". The baseline answers the harder
+question: "changed *from what?*" — without it there is no merge base, and no
+merge.
+
+## Why a script and not the model
+
+`kaizen-lock` is deterministic bash for the same reason `kaizen-detect` is, only
+more so. A model that computes SHA-256 by hand is wrong; a model that merges
+two versions of a file by hand produces **plausible-looking corruption**, which
+is the worst possible failure for a tool whose entire promise is "does not break
+anything".
+
+The division of labour:
+
+| Job | Owner |
+|---|---|
+| Hashing, snapshotting, classifying files | `kaizen-lock` (bash) |
+| The actual 3-way merge | `git merge-file` |
+| Deciding *what to do* about a conflict | The user, prompted by the skill |
+| Rendering today's template output | The model, exactly as `/kaizen:init` does |
+
+Merging is a solved problem with an implementation on every machine that has
+git. kaizen does not reimplement it.
+
+## The three states
+
+```
+                    kaizen-lock status
+                            │
+        ┌───────────────────┼───────────────────┐
+        ▼                   ▼                   ▼
+   unchanged             modified            deleted
+ hash == recorded    hash != recorded     file absent
+        │                   │                   │
+        ▼                   ▼                   ▼
+  replace silently   3-way merge via      leave deleted
+                     git merge-file       (a deletion is
+                            │              a decision)
+                ┌───────────┴───────────┐
+                ▼                       ▼
+          clean (0 conflicts)     conflicts > 0
+          apply automatically     ask the user:
+                                  keep yours / take theirs /
+                                  write markers
+```
+
+A file that is **not in the lock is not kaizen's**, and is never touched — even
+when it sits at a path kaizen would normally generate.
+
+## `kaizen-lock` interface
+
+| Subcommand | Does | Exit |
+|---|---|---|
+| `write [--plugin-version V] [--profile P] [--preset P] <file>…` | Hash + snapshot each file; merge into any existing lock (a partial write never drops untouched entries) | 0 |
+| `status` | Classify every recorded file; JSON with per-file state and a summary | 0 (also when no lock exists — `/upgrade` branches on that, it is not an error) |
+| `merge <tracked> <incoming>` | 3-way merge into a temp file; reports conflict count. **Writes nothing into the project** | 0 merged · 3 no baseline · 4 deleted by user |
+| `forget <file>…` | Stop tracking; drop the baseline snapshot | 0 |
+
+Every subcommand emits JSON on stdout. The `write` output includes
+`lock_is_gitignored`, which `/kaizen:init` and `/kaizen:upgrade` use to repair a
+`.gitignore` that would exclude the lock from version control.
+
+## `/kaizen:upgrade` phases
+
+1. **Read the lock.** No lock → stop with adoption instructions. Never fall back
+   to overwriting.
+2. **Compare versions.** Same version + modified files is *drift*, not an
+   upgrade — reported, not merged. A lock newer than the installed plugin means
+   the user downgraded: refuse.
+3. **Render** what today's templates produce, using the profile and preset
+   **recorded in the lock**, into a scratch directory. An upgrade changes
+   content, not identity.
+4. **Classify** each file and merge the modified ones.
+5. **Plan.** Print what would happen, showing substance ("your `no moment.js`
+   rule kept, new `Lint` line added"), not just filenames. Writes nothing.
+6. **Apply**, only when explicitly asked, only on a clean git tree, asking per
+   conflict, then re-recording the lock and printing the `git diff` / `git
+   checkout` commands to review or undo.
+
+## Boundaries
+
+**`/kaizen:upgrade` writes** (only in `apply` mode): files already recorded in
+the lock, `.claude/kaizen/lock.json` and its baselines, `.gitignore` (to
+un-ignore the lock).
+
+**It never**: touches a file absent from the lock, overwrites a modified file
+without merging, resurrects a deleted file, resolves a conflict on the user's
+behalf, commits, or changes the recorded profile/preset.
+
+## Why this is the architecturally important piece
+
+Every other ambition in [ROADMAP.md](../ROADMAP.md) depends on it. A versioned
+standards catalog is only useful if projects can *move between versions*
+safely. A `/kaizen:doctor` that detects stale configuration needs a safe way to
+fix it. Without the lock, each of those degrades back into "overwrite and hope".

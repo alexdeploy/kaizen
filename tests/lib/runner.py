@@ -25,6 +25,7 @@ SUITES = [
     "scripts",
     "hooks",
     "detect",
+    "lock",
 ]
 
 

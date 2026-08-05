@@ -2,7 +2,7 @@
 description: Bootstrap the Claude Code configuration for this project. Detects stack and maturity, then scaffolds a tailored CLAUDE.md, settings.json, rules, agents, and hooks. Works on empty AND existing projects. Supports profiles (minimal/standard/advanced) controlling how much workflow scaffolding to include.
 disable-model-invocation: true
 argument-hint: "[--preset <name>] [--profile=<minimal|standard|advanced>] [--force] [--minimal]"
-allowed-tools: Read, Write, Edit, Glob, Grep, Bash(kaizen-detect), Bash(kaizen-detect *), Bash(git *), Bash(chmod *), Bash(test *), Bash(ls *), Bash(find *), Bash(mkdir *)
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash(kaizen-detect), Bash(kaizen-detect *), Bash(kaizen-lock *), Bash(git *), Bash(chmod *), Bash(test *), Bash(ls *), Bash(find *), Bash(mkdir *)
 ---
 
 # /kaizen:init
@@ -402,11 +402,49 @@ If `--minimal` file-count flag is passed: only `CLAUDE.md` + `.claude/settings.j
 
 After writing hook scripts, run `chmod +x` on each via Bash tool.
 
-### 7. Archeology (optional, mature projects only)
+### 7. Record what you wrote (lock file) — v0.13+
+
+**Mandatory. Do this after every file is written and chmod'ed, before the report.**
+
+This is what makes `/kaizen:upgrade` possible later: without a record of exactly
+what kaizen produced, a future update cannot tell a file the user customised
+from one they never touched, and the only options are "overwrite your work" or
+"never update". Recording is cheap; not recording is unrecoverable.
+
+Run via **Bash tool**, passing every file you created or overwrote in this run:
+
+```
+kaizen-lock write --plugin-version <version from plugin.json> --profile <profile> --preset <preset> CLAUDE.md .claude/settings.json .claude/rules/<...> .claude/agents/<...> .claude/hooks/<...>
+```
+
+Rules:
+
+- **Only pass files you actually wrote.** Never pass a file you skipped because
+  it already existed — kaizen did not produce it and must not claim it.
+- Do **not** pass `.gitignore` (kaizen appends to it, never owns it).
+- The script writes `.claude/kaizen/lock.json` and snapshots each file under
+  `.claude/kaizen/baseline/`. You do not write either by hand.
+- If the script reports `"lock_is_gitignored": true`, the project's `.gitignore`
+  excludes the whole `.claude/kaizen/` directory. Fix it with the Edit tool:
+  replace the line `.claude/kaizen/` with `.claude/kaizen/*` followed by
+  `!.claude/kaizen/lock.json` and `!.claude/kaizen/baseline/`. The lock and its
+  baselines are meant to be committed; the reports and plans are not.
+- If `kaizen-lock` is not found, do not abort the run — report it in the drift
+  report as `⚠ lock not recorded (kaizen-lock unavailable); /kaizen:upgrade will
+  fall back to diff-only mode` and continue.
+
+Add one line to the drift report for it:
+
+```
+.claude/kaizen/lock.json:
+  ✎ Recorded <N> generated files for /kaizen:upgrade
+```
+
+### 8. Archeology (optional, mature projects only)
 
 Same as before: spawn Explore subagent, append findings to CLAUDE.md.
 
-### 8. Report
+### 9. Report
 
 Print the summary in this exact format:
 

@@ -1,0 +1,380 @@
+#!/usr/bin/env bash
+# kaizen :: kaizen-lock
+#
+# Bookkeeping for what kaizen wrote into a project, so a later upgrade can tell
+# "the user never touched this" from "the user customised this" — and merge
+# instead of overwriting.
+#
+# Deterministic on purpose: hashing and merging must never be done by the model.
+# The model reads this script's JSON and decides what to do about it.
+#
+#   kaizen-lock write [opts] <file>...   record files + snapshot them as baseline
+#   kaizen-lock status                   classify every recorded file
+#   kaizen-lock merge <file> <new>       3-way merge via git merge-file
+#   kaizen-lock forget <file>...         stop tracking files
+#
+# State lives under $CLAUDE_PROJECT_DIR/.claude/kaizen/:
+#   lock.json        what was written, by whom, when, with what hash
+#   baseline/<path>  a verbatim copy of what kaizen produced
+#
+# Both are meant to be COMMITTED — they are the project's record of its own
+# configuration provenance, the same way package-lock.json is.
+
+set -euo pipefail
+
+PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$PWD}"
+cd "$PROJECT_DIR"
+
+STATE_DIR=".claude/kaizen"
+LOCK_FILE="$STATE_DIR/lock.json"
+BASELINE_DIR="$STATE_DIR/baseline"
+LOCK_VERSION=1
+
+# ---------------------------------------------------------------- helpers ---
+
+die() { printf '%s\n' "kaizen-lock: $*" >&2; exit 1; }
+
+sha256() {
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  elif command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  elif command -v openssl >/dev/null 2>&1; then
+    openssl dgst -sha256 "$1" | awk '{print $NF}'
+  else
+    die "no sha256 tool found (need shasum, sha256sum or openssl)"
+  fi
+}
+
+json_escape() {
+  printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
+}
+
+now_iso() { date -u +"%Y-%m-%dT%H:%M:%SZ"; }
+
+# Read a top-level string field out of lock.json without needing jq.
+lock_field() {
+  [ -f "$LOCK_FILE" ] || return 1
+  sed -n "s/^[[:space:]]*\"$1\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" \
+    "$LOCK_FILE" | head -1
+}
+
+# Same, for numeric fields (lock_version is not quoted).
+lock_number() {
+  [ -f "$LOCK_FILE" ] || return 1
+  sed -n "s/^[[:space:]]*\"$1\"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p" \
+    "$LOCK_FILE" | head -1
+}
+
+# Emit `path<TAB>sha256` for every recorded file.
+lock_entries() {
+  [ -f "$LOCK_FILE" ] || return 0
+  awk '
+    /"files"[[:space:]]*:/ { infiles = 1 }
+    infiles && /"path"[[:space:]]*:/ {
+      match($0, /"path"[[:space:]]*:[[:space:]]*"[^"]*"/)
+      p = substr($0, RSTART, RLENGTH)
+      sub(/^"path"[[:space:]]*:[[:space:]]*"/, "", p); sub(/"$/, "", p)
+      path = p
+    }
+    infiles && /"sha256"[[:space:]]*:/ && path != "" {
+      match($0, /"sha256"[[:space:]]*:[[:space:]]*"[^"]*"/)
+      s = substr($0, RSTART, RLENGTH)
+      sub(/^"sha256"[[:space:]]*:[[:space:]]*"/, "", s); sub(/"$/, "", s)
+      printf "%s\t%s\n", path, s
+      path = ""
+    }
+  ' "$LOCK_FILE"
+}
+
+is_gitignored() {
+  git rev-parse --git-dir >/dev/null 2>&1 || { echo "false"; return; }
+  if git check-ignore -q "$1" 2>/dev/null; then echo "true"; else echo "false"; fi
+}
+
+# ------------------------------------------------------------------ write ---
+
+cmd_write() {
+  local plugin_version="unknown" standards_version="unset" profile="unknown" preset="unknown"
+  local files=()
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --plugin-version)    plugin_version="$2"; shift 2 ;;
+      --standards-version) standards_version="$2"; shift 2 ;;
+      --profile)           profile="$2"; shift 2 ;;
+      --preset)            preset="$2"; shift 2 ;;
+      --plugin-version=*)    plugin_version="${1#*=}"; shift ;;
+      --standards-version=*) standards_version="${1#*=}"; shift ;;
+      --profile=*)           profile="${1#*=}"; shift ;;
+      --preset=*)            preset="${1#*=}"; shift ;;
+      -*) die "unknown option for write: $1" ;;
+      *)  files+=("$1"); shift ;;
+    esac
+  done
+
+  [ ${#files[@]} -gt 0 ] || die "write needs at least one file"
+
+  mkdir -p "$STATE_DIR" "$BASELINE_DIR"
+
+  # Merge with anything already recorded: an upgrade re-records only the files
+  # it touched, and must not drop the rest.
+  local tmp_entries
+  tmp_entries="$(mktemp)"
+  lock_entries > "$tmp_entries" 2>/dev/null || true
+
+  local recorded=0 skipped=0
+  local new_entries
+  new_entries="$(mktemp)"
+
+  for file in "${files[@]}"; do
+    file="${file#./}"
+    if [ ! -f "$file" ]; then
+      printf 'kaizen-lock: skipping missing file: %s\n' "$file" >&2
+      skipped=$((skipped + 1))
+      continue
+    fi
+    local hash
+    hash="$(sha256 "$file")"
+    mkdir -p "$BASELINE_DIR/$(dirname "$file")"
+    cp "$file" "$BASELINE_DIR/$file"
+    printf '%s\t%s\n' "$file" "$hash" >> "$new_entries"
+    recorded=$((recorded + 1))
+  done
+
+  # New entries win over old ones for the same path.
+  local merged
+  merged="$(mktemp)"
+  awk -F'\t' 'NR==FNR { fresh[$1]=1; next } !($1 in fresh)' \
+    "$new_entries" "$tmp_entries" > "$merged" || true
+  cat "$new_entries" >> "$merged"
+  LC_ALL=C sort -o "$merged" "$merged"
+
+  {
+    printf '{\n'
+    printf '  "lock_version": %d,\n' "$LOCK_VERSION"
+    printf '  "_comment": "Written by kaizen-lock. Records what kaizen generated so /kaizen:upgrade can merge instead of overwrite. Commit this file and the baseline/ directory next to it.",\n'
+    printf '  "generated": "%s",\n' "$(now_iso)"
+    printf '  "plugin_version": "%s",\n' "$(json_escape "$plugin_version")"
+    printf '  "standards_version": "%s",\n' "$(json_escape "$standards_version")"
+    printf '  "profile": "%s",\n' "$(json_escape "$profile")"
+    printf '  "preset": "%s",\n' "$(json_escape "$preset")"
+    printf '  "files": [\n'
+    local first=1
+    while IFS=$'\t' read -r path hash; do
+      [ -n "$path" ] || continue
+      [ $first -eq 1 ] || printf ',\n'
+      first=0
+      printf '    { "path": "%s", "sha256": "%s" }' "$(json_escape "$path")" "$hash"
+    done < "$merged"
+    [ $first -eq 1 ] || printf '\n'
+    printf '  ]\n'
+    printf '}\n'
+  } > "$LOCK_FILE"
+
+  rm -f "$tmp_entries" "$new_entries" "$merged"
+
+  printf '{\n'
+  printf '  "action": "write",\n'
+  printf '  "lock_file": "%s",\n' "$LOCK_FILE"
+  printf '  "recorded": %d,\n' "$recorded"
+  printf '  "skipped": %d,\n' "$skipped"
+  printf '  "total_tracked": %d,\n' "$(lock_entries | wc -l | tr -d ' ')"
+  printf '  "lock_is_gitignored": %s\n' "$(is_gitignored "$LOCK_FILE")"
+  printf '}\n'
+}
+
+# ----------------------------------------------------------------- status ---
+
+cmd_status() {
+  if [ ! -f "$LOCK_FILE" ]; then
+    printf '{\n'
+    printf '  "action": "status",\n'
+    printf '  "lock_present": false,\n'
+    printf '  "reason": "no .claude/kaizen/lock.json — this project predates lock tracking, or was never initialised by kaizen",\n'
+    printf '  "files": []\n'
+    printf '}\n'
+    return 0
+  fi
+
+  local unchanged=0 modified=0 deleted=0 no_baseline=0
+  local body
+  body="$(mktemp)"
+
+  local first=1
+  while IFS=$'\t' read -r path recorded_hash; do
+    [ -n "$path" ] || continue
+    local state current_hash baseline_present
+    baseline_present="false"
+    [ -f "$BASELINE_DIR/$path" ] && baseline_present="true"
+
+    if [ ! -f "$path" ]; then
+      state="deleted"; current_hash=""
+      deleted=$((deleted + 1))
+    else
+      current_hash="$(sha256 "$path")"
+      if [ "$current_hash" = "$recorded_hash" ]; then
+        state="unchanged"; unchanged=$((unchanged + 1))
+      else
+        state="modified"; modified=$((modified + 1))
+      fi
+    fi
+
+    [ "$baseline_present" = "true" ] || no_baseline=$((no_baseline + 1))
+
+    [ $first -eq 1 ] || printf ',\n' >> "$body"
+    first=0
+    printf '    {\n' >> "$body"
+    printf '      "path": "%s",\n' "$(json_escape "$path")" >> "$body"
+    printf '      "state": "%s",\n' "$state" >> "$body"
+    printf '      "recorded_sha256": "%s",\n' "$recorded_hash" >> "$body"
+    printf '      "current_sha256": "%s",\n' "$current_hash" >> "$body"
+    printf '      "baseline_available": %s\n' "$baseline_present" >> "$body"
+    printf '    }' >> "$body"
+  done < <(lock_entries)
+  [ $first -eq 1 ] || printf '\n' >> "$body"
+
+  printf '{\n'
+  printf '  "action": "status",\n'
+  printf '  "lock_present": true,\n'
+  printf '  "lock_version": %s,\n' "$(lock_number lock_version 2>/dev/null || echo "$LOCK_VERSION")"
+  printf '  "plugin_version": "%s",\n' "$(lock_field plugin_version || echo unknown)"
+  printf '  "standards_version": "%s",\n' "$(lock_field standards_version || echo unset)"
+  printf '  "profile": "%s",\n' "$(lock_field profile || echo unknown)"
+  printf '  "preset": "%s",\n' "$(lock_field preset || echo unknown)"
+  printf '  "generated": "%s",\n' "$(lock_field generated || echo unknown)"
+  printf '  "summary": { "unchanged": %d, "modified": %d, "deleted": %d, "missing_baseline": %d },\n' \
+    "$unchanged" "$modified" "$deleted" "$no_baseline"
+  printf '  "files": [\n'
+  cat "$body"
+  printf '  ]\n'
+  printf '}\n'
+  rm -f "$body"
+}
+
+# ------------------------------------------------------------------ merge ---
+
+# Three-way merge of one file:
+#   base    = what kaizen wrote last time      (baseline/<path>)
+#   mine    = what the project has now         (<path>)
+#   theirs  = what kaizen would write today    (<new-file>)
+#
+# git merge-file does the actual work. Exit status is the conflict count, which
+# is the number the caller cares about.
+cmd_merge() {
+  [ $# -ge 2 ] || die "merge needs <tracked-file> <new-file>"
+  local path="${1#./}" incoming="$2"
+  local base="$BASELINE_DIR/$path"
+
+  [ -f "$incoming" ] || die "incoming file not found: $incoming"
+
+  if [ ! -f "$base" ]; then
+    printf '{ "action": "merge", "path": "%s", "result": "no-baseline", "conflicts": -1,\n' "$(json_escape "$path")"
+    printf '  "reason": "no baseline snapshot for this file; cannot merge safely — treat as a user-owned file and show a plain diff instead" }\n'
+    return 3
+  fi
+
+  if [ ! -f "$path" ]; then
+    printf '{ "action": "merge", "path": "%s", "result": "deleted-by-user", "conflicts": -1,\n' "$(json_escape "$path")"
+    printf '  "reason": "the file is gone; the user removed it deliberately — do not resurrect it without asking" }\n'
+    return 4
+  fi
+
+  local out
+  out="$(mktemp "${TMPDIR:-/tmp}/kaizen-merge-XXXXXX")"
+
+  local conflicts=0
+  set +e
+  git merge-file -p --diff3 \
+    -L "yours (current file)" -L "base (what kaizen wrote)" -L "theirs (new kaizen output)" \
+    "$path" "$base" "$incoming" > "$out"
+  conflicts=$?
+  set -e
+
+  if [ "$conflicts" -lt 0 ]; then
+    rm -f "$out"
+    die "git merge-file failed for $path"
+  fi
+
+  local result="clean"
+  [ "$conflicts" -gt 0 ] && result="conflicts"
+
+  printf '{\n'
+  printf '  "action": "merge",\n'
+  printf '  "path": "%s",\n' "$(json_escape "$path")"
+  printf '  "result": "%s",\n' "$result"
+  printf '  "conflicts": %d,\n' "$conflicts"
+  printf '  "merged_file": "%s",\n' "$out"
+  printf '  "note": "nothing was written to the project; read merged_file and decide"\n'
+  printf '}\n'
+  return 0
+}
+
+# ----------------------------------------------------------------- forget ---
+
+cmd_forget() {
+  [ $# -ge 1 ] || die "forget needs at least one file"
+  [ -f "$LOCK_FILE" ] || die "no lock file to forget from"
+
+  local drop
+  drop="$(mktemp)"
+  for file in "$@"; do printf '%s\n' "${file#./}" >> "$drop"; done
+
+  local kept
+  kept="$(mktemp)"
+  lock_entries | awk -F'\t' 'NR==FNR { gone[$0]=1; next } !($1 in gone)' "$drop" - > "$kept"
+
+  local plugin_version standards_version profile preset
+  plugin_version="$(lock_field plugin_version || echo unknown)"
+  standards_version="$(lock_field standards_version || echo unset)"
+  profile="$(lock_field profile || echo unknown)"
+  preset="$(lock_field preset || echo unknown)"
+
+  {
+    printf '{\n'
+    printf '  "lock_version": %d,\n' "$LOCK_VERSION"
+    printf '  "generated": "%s",\n' "$(now_iso)"
+    printf '  "plugin_version": "%s",\n' "$plugin_version"
+    printf '  "standards_version": "%s",\n' "$standards_version"
+    printf '  "profile": "%s",\n' "$profile"
+    printf '  "preset": "%s",\n' "$preset"
+    printf '  "files": [\n'
+    local first=1
+    while IFS=$'\t' read -r path hash; do
+      [ -n "$path" ] || continue
+      [ $first -eq 1 ] || printf ',\n'
+      first=0
+      printf '    { "path": "%s", "sha256": "%s" }' "$(json_escape "$path")" "$hash"
+    done < "$kept"
+    [ $first -eq 1 ] || printf '\n'
+    printf '  ]\n'
+    printf '}\n'
+  } > "$LOCK_FILE"
+
+  while read -r path; do
+    [ -n "$path" ] && rm -f "$BASELINE_DIR/$path"
+  done < "$drop"
+
+  printf '{ "action": "forget", "dropped": %d, "total_tracked": %d }\n' \
+    "$(wc -l < "$drop" | tr -d ' ')" "$(lock_entries | wc -l | tr -d ' ')"
+
+  rm -f "$drop" "$kept"
+}
+
+# ------------------------------------------------------------------- main ---
+
+usage() {
+  sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
+}
+
+[ $# -ge 1 ] || { usage; exit 2; }
+
+subcommand="$1"; shift
+case "$subcommand" in
+  write)  cmd_write "$@" ;;
+  status) cmd_status "$@" ;;
+  merge)  cmd_merge "$@" ;;
+  forget) cmd_forget "$@" ;;
+  -h|--help|help) usage ;;
+  *) die "unknown subcommand: $subcommand (want: write, status, merge, forget)" ;;
+esac

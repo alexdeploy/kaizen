@@ -146,8 +146,18 @@ def walk_files(root, suffixes=None):
 
 
 def shell_scripts():
-    """Every shell script shipped by the plugin, including template hooks."""
-    found = [DETECT_BIN]
+    """Every shell script shipped by the plugin.
+
+    Everything in bin/ (which has no extension by convention, since Claude Code
+    puts the directory on PATH) plus every .sh under the plugin, including the
+    hooks that templates copy into user projects.
+    """
+    bin_dir = os.path.join(PLUGIN_ROOT, "bin")
+    found = sorted(
+        os.path.join(bin_dir, name)
+        for name in os.listdir(bin_dir)
+        if os.path.isfile(os.path.join(bin_dir, name))
+    )
     found += sorted(walk_files(PLUGIN_ROOT, [".sh"]))
     return found
 

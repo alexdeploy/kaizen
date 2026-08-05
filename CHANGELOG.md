@@ -10,6 +10,36 @@ While v0.x, **minor versions may include breaking changes**. From v1.0.0 onward,
 
 ## [Unreleased]
 
+### Added — configuration lock + `/kaizen:upgrade` (branch `next`)
+
+The first phase of the direction proposed in [ROADMAP.md](./ROADMAP.md): kaizen
+now records what it generates, so it can update a project later without
+overwriting what the user changed.
+
+- **`bin/kaizen-lock`** — deterministic bookkeeping. `write` hashes every
+  generated file and snapshots it under `.claude/kaizen/baseline/`; `status`
+  classifies each recorded file as `unchanged` / `modified` / `deleted`;
+  `merge` runs a real 3-way merge through `git merge-file` and reports the
+  conflict count without writing anything; `forget` untracks. All output is
+  JSON — the model reads it and decides, it never hashes or merges by hand.
+- **`.claude/kaizen/lock.json` + `baseline/`** — meant to be **committed**, like
+  `package-lock.json`. The `.gitignore` template now ignores
+  `.claude/kaizen/*` while negating both, and `kaizen-lock write` reports
+  `lock_is_gitignored` so the skills can repair an older `.gitignore`.
+- **`/kaizen:init` step 7** — records what it wrote. Additive: no existing
+  behaviour changes, and a missing `kaizen-lock` degrades to a warning in the
+  drift report rather than a failure.
+- **`/kaizen:upgrade`** — new skill. Plans before it writes, merges instead of
+  overwriting, never touches a file absent from the lock, never resurrects a
+  deleted one, and never resolves a conflict on the user's behalf. This is what
+  `--force` should have been.
+- **`tests/suites/test_lock.py`** — 37 behavioural checks over real temp repos,
+  including the two that matter: non-overlapping edits merge cleanly with the
+  user's own rule intact, and same-line edits are reported as conflicts rather
+  than silently merged away.
+- Docs: [`docs/architecture.md` §17](./docs/architecture.md) and a
+  "Configuration lock" section in the README.
+
 ### Added — validation harness
 
 kaizen now has a test suite. Until now the plugin had no automated verification
