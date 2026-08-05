@@ -1,0 +1,3 @@
+{
+  "_comment": "Go is detected but has no template preset — this fixture is what makes the generic-fallback warning in the templates suite concrete."
+}

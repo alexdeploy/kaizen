@@ -1,0 +1,9 @@
+{
+  "_comment": "Model ids kaizen agents are allowed to declare. A model outside this list is a WARNING, not a failure — it usually means the ids went stale after a model release. Update this file and the agent frontmatter together.",
+  "models": [
+    "claude-opus-4-6",
+    "claude-sonnet-4-6",
+    "claude-haiku-4-5",
+    "inherit"
+  ]
+}

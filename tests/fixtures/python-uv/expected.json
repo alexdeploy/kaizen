@@ -1,0 +1,9 @@
+{
+  "stack": "python",
+  "package_manager": "uv",
+  "maturity": "scaffold",
+  "git": { "is_repo": false, "commits": 0, "branch": "none" },
+  "existing_claude_config": "",
+  "tests_found": 1,
+  "ci": "none"
+}

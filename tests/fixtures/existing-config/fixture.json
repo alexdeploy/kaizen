@@ -1,0 +1,3 @@
+{
+  "_comment": "Drives the branch /kaizen:init refuses on without --force. The CSV order of existing_claude_config is part of the contract: init parses it."
+}

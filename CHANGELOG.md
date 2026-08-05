@@ -10,6 +10,47 @@ While v0.x, **minor versions may include breaking changes**. From v1.0.0 onward,
 
 ## [Unreleased]
 
+### Added — validation harness
+
+kaizen now has a test suite. Until now the plugin had no automated verification
+of any kind: a renamed agent, an unregistered template placeholder or a version
+bumped in one manifest but not the other shipped silently.
+
+- **`tests/run.sh`** — 8 deterministic suites, 772 checks, ~0.5s, Python 3
+  stdlib + bash only. Guards manifest/version agreement, skill and agent
+  frontmatter contracts, agent dispatch references, **bidirectional
+  placeholder/enrichment-directive registry integrity**, shell script health,
+  hook-stub no-op invariants, and golden output for `kaizen-detect` across six
+  fixture repos.
+- **`tests/run.sh --live`** — opt-in behavioural evals. Runs real headless
+  Claude Code sessions against throwaway fixture copies and asserts on what
+  `/kaizen:init` actually wrote: no unsubstituted `{{PLACEHOLDER}}` or
+  `KAIZEN_ENRICH:` marker leaked, hooks are executable, the profile shape is
+  right, the boundary contract held, the drift report was printed. A session
+  that cannot complete (quota, auth, network) exits **3 — inconclusive**, never
+  1, so infrastructure failure is never read as a product regression.
+- **`.github/workflows/tests.yml`** — the deterministic layer runs on every push
+  and PR, with shellcheck installed. The live evals are deliberately excluded:
+  they cost tokens.
+- **Documentation** — [`docs/validation.md`](./docs/validation.md) (why it
+  exists, what it can and cannot prove, where it sits in the release process)
+  and [`tests/README.md`](./tests/README.md) (how to run it, how to add a
+  fixture or a suite).
+
+### Fixed
+- **`README.md` announced v0.12.0 while the plugin shipped 0.12.1** — found by
+  the `manifests` suite on its first run.
+
+### Known gaps now surfaced on every run (as warnings, not failures)
+- Six stacks (`go`, `rust`, `java`, `ruby`, `php`, `elixir`) are detected by
+  `kaizen-detect` but fall back to the `generic` preset — detection promises
+  more adaptation than the templates deliver.
+- `{{HAS_CI}}` and `{{STACK_RAW}}` are documented in the placeholder registry
+  but no template uses them.
+- `detect_maturity` counts only source extensions, so a repo of prose and shell
+  scripts reports `maturity: "empty"` — kaizen's own repo included. Encoded as a
+  passing golden with a `_note` in the `docs-only` fixture.
+
 ### Planned (backlog tracked in BACKLOG.md + TODO.md)
 - More hook implementations from `TODO.md "Hooks Implementation"`.
 - MCP integrations from `TODO.md "MCP Integration"`.

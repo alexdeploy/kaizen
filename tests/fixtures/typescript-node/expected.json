@@ -1,0 +1,9 @@
+{
+  "stack": "frontend,typescript",
+  "package_manager": "pnpm",
+  "maturity": "scaffold",
+  "git": { "is_repo": true, "commits": 3, "branch": "main" },
+  "existing_claude_config": "",
+  "tests_found": 1,
+  "ci": "github-actions"
+}

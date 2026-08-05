@@ -1,0 +1,5 @@
+---
+paths: ["src/**"]
+---
+
+Fixture rule.

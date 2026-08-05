@@ -7,3 +7,7 @@ node_modules/
 
 # Personal notes (not for the public repo)
 NOTES.md
+
+# Python bytecode from the test harness
+__pycache__/
+*.pyc
