@@ -1,0 +1,4 @@
+{
+  "_comment": "Exercises the happy path /kaizen:init is tuned for: a young TS/React repo with a lockfile, a test, and CI.",
+  "git": { "init": true, "commits": 3, "branch": "main" }
+}

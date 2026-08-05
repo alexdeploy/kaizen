@@ -1,0 +1,9 @@
+{
+  "stack": "javascript",
+  "package_manager": "npm",
+  "maturity": "scaffold",
+  "git": { "is_repo": false, "commits": 0, "branch": "none" },
+  "existing_claude_config": "CLAUDE.md,settings.json,rules/,.mcp.json",
+  "tests_found": 0,
+  "ci": "none"
+}

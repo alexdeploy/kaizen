@@ -3,7 +3,7 @@
 > 改善 (kaizen) = continuous improvement.
 > A Claude Code plugin that scaffolds a complete, adapted `.claude/` setup for any project — empty or existing — and (in future versions) evolves it as the project grows.
 
-## What it does today (v0.12.0)
+## What it does today (v0.12.1)
 
 `/kaizen:init --profile=advanced` now scaffolds a **project-level agent ecosystem** — 6 agents in `<project>/.claude/agents/` that Claude auto-invokes during general conversation (not just when invoking kaizen skills). Plus 2 new hooks (secret-detector + dependency-changed).
 
@@ -132,6 +132,23 @@ You should see a JSON payload with `stack`, `package_manager`, `maturity`, `git`
    ```
    Then restart Claude Code so the new skills/agents are loaded.
 4. Future releases: bump `version` in **both** `plugins/kaizen/.claude-plugin/plugin.json` **and** `.claude-plugin/marketplace.json`, then push. Users update with `/plugin marketplace update kaizen` and restart Claude Code.
+
+## Validation
+
+kaizen is made of prompts, so nothing about it is checked by a compiler. The
+harness in [`tests/`](./tests/README.md) closes that gap:
+
+```bash
+tests/run.sh          # deterministic suites — ~0.5s, no dependencies
+tests/run.sh --live   # + real headless sessions, asserting on what /init wrote
+```
+
+The deterministic layer verifies that the manifests agree on a version, every
+dispatched agent exists, every `{{PLACEHOLDER}}` and `KAIZEN_ENRICH` marker in a
+template has a matching directive in `init/SKILL.md` (both directions), every
+script parses, every hook stub is still a silent no-op, and `kaizen-detect`
+returns exactly what it used to for each fixture repo. It runs on every push via
+[GitHub Actions](./.github/workflows/tests.yml).
 
 ## Design principles
 

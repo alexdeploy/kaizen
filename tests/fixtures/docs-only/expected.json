@@ -1,0 +1,10 @@
+{
+  "stack": "generic",
+  "package_manager": "none",
+  "maturity": "empty",
+  "git": { "is_repo": false, "commits": 0, "branch": "none" },
+  "existing_claude_config": "",
+  "tests_found": 0,
+  "ci": "none",
+  "_note": "maturity is 'empty' for a repo with a README, docs/ and shell scripts, because detect_maturity only counts compiled/scripted source extensions (.ts .py .go .rs ...). kaizen's own repo detects as empty for this reason. Change detect_maturity and this golden together."
+}

@@ -9,6 +9,7 @@ Welcome. This folder documents how the kaizen plugin behaves **once it's install
 | Install kaizen and run `/kaizen:init` | **[user-manual.md](./user-manual.md)** |
 | Understand the decision tree (what kaizen asks, when, why) | **[runtime-flow.md](./runtime-flow.md)** |
 | Know what each runtime component does and how data flows | **[architecture.md](./architecture.md)** |
+| Know how kaizen proves it still works before shipping | **[validation.md](./validation.md)** |
 
 ## At a glance
 
@@ -69,6 +70,7 @@ Welcome. This folder documents how the kaizen plugin behaves **once it's install
 | Documented here | Not documented here |
 |---|---|
 | `/kaizen:init` runtime behavior | How to write your own kaizen-style plugin |
+| Why the validation harness exists ([validation.md](./validation.md)) | How to run it check-by-check (see [tests/README.md](../tests/README.md)) |
 | The decision tree and its branches | The plugin manifest schema (see Claude Code docs) |
 | What files get generated and why | Roadmap detail (see repo [TODO](../README.md#whats-coming-next)) |
 | Installation and troubleshooting | Marketplace publishing flow (see repo README) |
