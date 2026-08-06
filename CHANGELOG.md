@@ -10,6 +10,48 @@ While v0.x, **minor versions may include breaking changes**. From v1.0.0 onward,
 
 ## [Unreleased]
 
+### Added — `/kaizen:doctor`: the other half of "breaks nothing"
+
+Phase 6. The lock stops kaizen's own updates from destroying your edits; nothing
+stopped **Claude Code's** evolution from quietly invalidating your config.
+Decision record: [ADR-0010](./docs/decisions/0010-doctor-diagnoses-the-platform.md).
+
+- **`bin/kaizen-doctor`** (Python 3, JSON out) checks the platform and the
+  environment: deprecated settings keys, **misspelled hook event names** —
+  detected by edit distance, because a misspelled event never fires and never
+  errors — hooks and status lines pointing at missing or non-executable scripts,
+  unparseable settings, unsubstituted template markers still in `CLAUDE.md`, rules
+  with no `paths:`, agents with no frontmatter, a gitignored lock, missing baseline
+  snapshots, standards drift, and absent tools.
+- **`compat/claude-code.json`** — known settings keys, permissions keys, hook
+  events, deprecations and external tools. Versioned separately (`2026.08`) for the
+  same reason the standards catalog is: the platform outruns plugin releases.
+- **Three severities, and the third is load-bearing.** `problem` means kaizen can
+  prove it is broken; `warning` means probably wrong; `info` means kaizen does not
+  *recognise* it. The registry cannot list every valid key, so an unfamiliar one is
+  reported as unfamiliar — treating it as invalid would make doctor confidently
+  wrong the day the platform ships a new key.
+- **`/kaizen:doctor --fix`** applies only changes with one correct outcome:
+  `chmod +x`, the `.gitignore` negation, an agent name mismatch, and a `paths:`
+  block whose globs it **asks** for rather than guesses.
+- **`tests/suites/test_doctor.py` — 73 checks.** The most important is that a
+  healthy project reports nothing: the first false alarm is the last one anyone
+  reads.
+- A tenth verb needed a justification, so the bar is now written down: **a new
+  skill needs a distinct subject, not a distinct report section.** Doctor's subject
+  is the platform, and it is the only skill that assumes the config may be invalid.
+
+### Fixed — doctor called `node` a missing file
+
+Found by running it against a real project on the first try. A hook command's
+first token is not necessarily a path: `node .claude/hooks/reminder.mjs` is an
+entirely normal hook. Resolution now classifies the first token as a path (must
+exist and be executable) or a program name (must be on PATH), then checks the
+interpreter's script argument separately. Four checks pin the behaviour.
+
+The same run found something real, which is the point: four agents in that
+project have no frontmatter, so Claude Code never loaded them as agents.
+
 ### Added — three working hooks, and a security baseline the harness asserts
 
 Phase 5. kaizen shipped **thirty** hook scripts, every one a no-op `exit 0`, with

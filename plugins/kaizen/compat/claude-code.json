@@ -1,0 +1,103 @@
+{
+  "_comment": "kaizen :: what kaizen knows about the Claude Code it is running inside. Versioned independently of the plugin, like the standards catalog, because the platform moves faster than kaizen releases. See docs/decisions/0010-doctor-diagnoses-the-platform.md.",
+
+  "compat_version": "2026.08",
+  "compat_schema": 1,
+
+  "_honesty_note": "This registry is NOT an exhaustive list of everything Claude Code accepts — kaizen cannot know that, and a check built on the assumption that it does would start producing false errors the day a new key ships. So: a key kaizen does not recognise is reported as INFORMATIONAL, never as invalid. Only two things are ever reported as problems — a key on the deprecated list, and a structural fault kaizen can prove (a hook pointing at a file that does not exist).",
+
+  "claude_code_versions_seen": ["2.1.x"],
+  "verified_against": "2.1.222",
+
+  "_settings_keys_comment": "Top-level settings.json keys kaizen recognises. Used to classify, not to validate.",
+  "settings_keys_known": [
+    "$schema",
+    "permissions",
+    "env",
+    "hooks",
+    "statusLine",
+    "subagentStatusLine",
+    "model",
+    "outputStyle",
+    "includeCoAuthoredBy",
+    "cleanupPeriodDays",
+    "autoMemoryEnabled",
+    "apiKeyHelper",
+    "enableAllProjectMcpServers",
+    "enabledMcpjsonServers",
+    "disabledMcpjsonServers",
+    "disableAllHooks",
+    "forceLoginMethod",
+    "agents"
+  ],
+
+  "_permissions_keys_comment": "Keys valid inside the `permissions` object.",
+  "permissions_keys_known": [
+    "allow",
+    "deny",
+    "ask",
+    "defaultMode",
+    "additionalDirectories",
+    "disableBypassPermissionsMode"
+  ],
+
+  "permissions_default_modes": [
+    "default",
+    "acceptEdits",
+    "plan",
+    "bypassPermissions",
+    "dontAsk",
+    "auto",
+    "manual"
+  ],
+
+  "_deprecated_comment": "Keys that were valid and are not any more. Each carries what replaced it, so /kaizen:doctor can propose the migration rather than just complain. Empty is the honest state today: kaizen has not yet observed a settings key removed from Claude Code. Entries get added when one is, with a source.",
+  "settings_keys_deprecated": {},
+
+  "_hook_events_comment": "Every hook event name kaizen knows. Derived from the 29 event stubs the plugin used to ship, which were built from the Claude Code hooks documentation. A hooks.json naming an event outside this list is reported as informational — it may be newer than this registry — EXCEPT when it looks like a near-miss of a known name, which is almost always a typo that silently never fires.",
+  "hook_events_known": [
+    "SessionStart",
+    "SessionEnd",
+    "Setup",
+    "UserPromptSubmit",
+    "UserPromptExpansion",
+    "Stop",
+    "StopFailure",
+    "PreToolUse",
+    "PostToolUse",
+    "PostToolUseFailure",
+    "PostToolBatch",
+    "PermissionRequest",
+    "PermissionDenied",
+    "SubagentStart",
+    "SubagentStop",
+    "TaskCreated",
+    "TaskCompleted",
+    "TeammateIdle",
+    "InstructionsLoaded",
+    "ConfigChange",
+    "CwdChanged",
+    "FileChanged",
+    "PreCompact",
+    "PostCompact",
+    "Notification",
+    "Elicitation",
+    "ElicitationResult",
+    "WorktreeCreate",
+    "WorktreeRemove"
+  ],
+
+  "hook_events_deprecated": {},
+
+  "_budget_comment": "CLAUDE.md is loaded into every session, so its size is a recurring token cost rather than a one-off. The template itself asks the reader to keep it under ~200 lines; these are the thresholds /kaizen:doctor reports against.",
+  "claude_md_lines_warn": 200,
+  "claude_md_lines_problem": 400,
+
+  "_tools_comment": "External programs kaizen uses, and what degrades when each is missing. `required: false` means kaizen still works, with the stated loss.",
+  "external_tools": [
+    { "name": "git",     "required": true,  "used_for": "everything: detection, diffs, and the 3-way merge behind /kaizen:upgrade" },
+    { "name": "python3", "required": false, "used_for": "the standards catalog and workspace parsing; without it kaizen reads the JSON directly and cannot detect npm-style workspaces" },
+    { "name": "jq",      "required": false, "used_for": "faster payload parsing in the generated hooks; they fall back to python3 then sed" },
+    { "name": "shasum",  "required": false, "used_for": "the configuration lock; sha256sum or openssl are used instead when absent" }
+  ]
+}

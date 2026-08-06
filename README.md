@@ -5,9 +5,9 @@
 
 ## What it does today (v0.12.1)
 
-`/kaizen:init --profile=advanced` now scaffolds a **project-level agent ecosystem** — 6 agents in `<project>/.claude/agents/` that Claude auto-invokes during general conversation (not just when invoking kaizen skills). Plus 2 new hooks (secret-detector + dependency-changed).
+**Shipped (v0.12.1):** 8 skills, 6 plugin-level agents, 7 project-level agents in the `advanced` profile, and a profile system for `/init`.
 
-**8 skills**, **6 plugin-level agents**, and a **profile system** for `/init`:
+**On the `next` branch, unreleased:** a configuration lock so updates cannot destroy your edits, a versioned standards catalog with provenance, workspace/monorepo detection, `/kaizen:upgrade`, `/kaizen:doctor`, three active hooks, and a validation harness of ~1.800 checks. See [ROADMAP.md](./ROADMAP.md) for why, [docs/decisions/](./docs/decisions/README.md) for each decision, and [HANDOFF.md](./HANDOFF.md) for what is verified and what is not.
 
 - `/kaizen:init` — bootstraps the project config. Profile flag: `--profile=<minimal|standard|advanced>` (default `standard`). The base scaffolding generates `CLAUDE.md`, settings, rules, code-reviewer agent, and hooks; standard+ profiles add a `workflow.md` rule documenting the kaizen-skill flow.
 - `/kaizen:learn` — proposes CLAUDE.md/rules updates from git activity. `--limit=<N>` / `--since=<ref>` for scope. Subcommands: `show`, `apply`, `discard`.
@@ -17,6 +17,7 @@
 - `/kaizen:docs` — surfaces user-facing documentation gaps from recent changes via the `docs-keeper` agent. Read-only.
 - `/kaizen:bump` — suggests semver bump (major/minor/patch) via the `versioner` agent. Detects changesets. Supports JS/TS, Python, Rust.
 - `/kaizen:finish` — **end-of-task orchestrator**. Chains deterministic checks + 4 parallel agents (security + commit + bump + docs) into a unified verdict and per-concern guidance.
+- `/kaizen:doctor` — **(unreleased, `next` branch)** is this setup actually working? Finds hooks pointing at missing scripts, misspelled hook events that silently never fire, deprecated settings keys, unsubstituted template markers, a gitignored lock, and missing tools. `--fix` applies only the unambiguous repairs.
 - `/kaizen:upgrade` — **(unreleased, `next` branch)** updates a project's generated config to the current plugin version **without overwriting your customisations**. Uses the lock file to tell untouched files from edited ones, and `git merge-file` for the rest. Plans before it writes. See [Configuration lock](#configuration-lock).
 
 ## Standards catalog
@@ -120,8 +121,16 @@ kaizen/
     └── kaizen/                   ← the plugin itself
         ├── .claude-plugin/
         │   └── plugin.json
-        ├── bin/
-        │   └── kaizen-detect     ← auto-added to PATH when plugin is enabled
+        ├── bin/                  ← auto-added to PATH when plugin is enabled
+        │   ├── kaizen-detect     ← project fingerprint (bash)
+        │   ├── kaizen-lock       ← what was generated; hashing + 3-way merge (bash)
+        │   ├── kaizen-standards  ← query/render the rule catalog (python3)
+        │   └── kaizen-doctor     ← config + platform health (python3)
+        ├── standards/            ← the versioned rule catalog
+        ├── compat/               ← what kaizen knows about Claude Code
+        ├── hooks/
+        │   ├── hooks.json        ← the three active hooks
+        │   └── scripts/          ← their implementations
         ├── agents/
         │   ├── preflight-security.md         ← /preflight + /finish (security audit)
         │   ├── commit-suggester.md           ← /preflight + /finish (commit msg)

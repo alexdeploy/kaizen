@@ -40,6 +40,10 @@ knowing what it costs.
   a trade-off you already made.
 - Record decisions about *the product*, not about implementation detail. "Which
   JSON key name" is not an ADR. "Runtime scripts may be Python" is.
+- **A new skill needs a distinct subject, not a distinct report section.** If it
+  reads the same things an existing skill reads, it is a flag on that skill. Set
+  in [ADR-0010](./0010-doctor-diagnoses-the-platform.md) after `/kaizen:doctor`
+  became the second exception to the no-new-verbs rule.
 
 ## Index
 
@@ -54,3 +58,4 @@ knowing what it costs.
 | [0007](./0007-monorepo-is-a-shape.md) | A monorepo is a shape, not a preset | accepted |
 | [0008](./0008-analyze-reports-by-rule-id.md) | `/kaizen:analyze` reports by rule id, over three populations | accepted |
 | [0009](./0009-three-hooks-on-by-default.md) | Three hooks, on by default; delete the other twenty-six | accepted |
+| [0010](./0010-doctor-diagnoses-the-platform.md) | `/kaizen:doctor` diagnoses the platform, and gets to be a verb | accepted |

@@ -20,16 +20,22 @@ plugins/kaizen/
 ├── bin/                    deterministic executables — facts, never judgement
 │   ├── kaizen-detect       bash   · project fingerprint → JSON
 │   ├── kaizen-lock         bash   · what was generated; hashing and 3-way merge
-│   └── kaizen-standards    py3    · query and render the rule catalog
+│   ├── kaizen-standards    py3    · query and render the rule catalog
+│   └── kaizen-doctor       py3    · config + platform health → JSON findings
 ├── standards/              the rule catalog — versioned data with provenance
 │   ├── index.json          version, surfaces, severities, check types
 │   ├── universal.json      UNI-*
 │   ├── typescript.json     TS-*
 │   └── python.json         PY-*
+├── compat/                 what kaizen knows about Claude Code, versioned apart
+│   └── claude-code.json    known settings keys, hook events, deprecations, tools
 ├── skills/<name>/SKILL.md  the prompts — judgement, never arithmetic
 │   └── init/templates/     what gets written into user projects
 ├── agents/*.md             subagent definitions used by preflight/plan/finish
-└── hooks/scripts/*.sh      29 stubs, all no-ops, none wired
+├── hooks/
+│   ├── hooks.json          the three hooks that are actually active
+│   └── scripts/*.sh        their implementations (+ the subagent statusline)
+└── settings.json           plugin-level: subagentStatusLine
 ```
 
 Roughly: **~3.000 lines of prompt, ~800 lines of deterministic script, ~1.100
@@ -243,6 +249,61 @@ the purpose.
 
 ---
 
+## 5b. The passive layer
+
+Three hooks run without being invoked, wired in `hooks/hooks.json`
+([ADR-0009](./decisions/0009-three-hooks-on-by-default.md)):
+
+| Hook | Behaviour | Off switch |
+|---|---|---|
+| `PreToolUse` (Bash) | blocks a catastrophic set, warns on a risky set | `KAIZEN_SAFETY=off` |
+| `SessionStart` | injects repo state, last verdict, standards drift; silent when there is nothing to say | — |
+| `Stop` | suggests `/kaizen:finish` once per session; marker in the temp dir, never in the project | `KAIZEN_NUDGE=off` |
+
+The governing rule for the block list: **a pattern belongs there only if no
+legitimate command could ever match it.** `rm -rf node_modules` is ordinary work a
+dozen times a day in a JavaScript project. This is why the harness's
+must-NOT-block table is longer than its must-block table, and why a false positive
+is the highest-severity bug this component can have.
+
+Hooks deliberately use `set -uo pipefail` **without `-e`**: they branch on
+commands that return non-zero, and `set -e` would abort them mid-way, silently.
+The harness enforces the absence of `set -e` in anything under a `hooks/`
+directory, and the presence of `set -euo pipefail` everywhere else.
+
+## 5c. Doctor and the compat registry
+
+`bin/kaizen-doctor` is the only component that looks *outward* — at the Claude
+Code version, at whether the config references things that exist, at whether the
+tools kaizen needs are installed
+([ADR-0010](./decisions/0010-doctor-diagnoses-the-platform.md)).
+
+Its severity tiers are a contract:
+
+```
+problem   kaizen can PROVE it is broken      →  exit 1
+warning   probably wrong, or a real cost     →  exit 0
+info      kaizen does not RECOGNISE it       →  exit 0
+```
+
+`info` is the load-bearing one. `compat/claude-code.json` cannot list every valid
+settings key, so an unfamiliar key is reported as unfamiliar. Treating it as
+invalid would make doctor confidently wrong on a schedule set by someone else's
+release cadence.
+
+Two implementation notes worth keeping:
+
+- **Hook commands are not paths.** `node .claude/hooks/reminder.mjs` is a normal
+  hook. Resolution classifies the first token as a path (must exist, must be
+  executable) or a program name (must be on PATH), and then checks the
+  interpreter's script argument separately. Taking the first token as a path made
+  doctor report that a file called `node` did not exist — found by running it
+  against a real project.
+- **Near-miss detection uses edit distance.** A misspelled hook event never fires
+  and never errors, which makes it the worst configuration bug available. Distance
+  ≤ 2 turns `SesionStart` into a named problem while leaving a genuinely new event
+  name as `info`.
+
 ## 6. Invariants
 
 These hold across every skill. Breaking one is a bug regardless of what else the
@@ -309,6 +370,7 @@ product failure.
 
 | You want to… | Touch | Also |
 |---|---|---|
+| Teach doctor a new deprecation or hook event | `compat/claude-code.json` | bump `compat_version`; an unknown key must stay `info`, never a problem |
 | Add or change a rule | `standards/<domain>.json` | bump `standards_version`; the harness checks schema, provenance and ripgrep compatibility |
 | Support a new stack | `kaizen-detect` + `tests/config/stack-presets.json` + a preset dir | add a fixture with a golden |
 | Change what a template says | `templates/…` | if it is a rule, it belongs in the catalog instead |

@@ -46,6 +46,8 @@ look arbitrary are deliberate.
 | Phase 4 | `/kaizen:analyze` verifies from the catalog | **Live: 13 assertions passed.** Reported by rule id with rationale + source, kept the three populations apart, honoured excludes (`.d.ts` and `scripts/`), and printed the check notes |
 | Phase 4 | Depth-agnostic check globs | 38 globs fixed; TS-004 went from 36 false violations to 0 on a real monorepo |
 | Phase 5 | Three active hooks + security baseline | 121 safety checks incl. an 18-command must-NOT-block table; every hook exercised with and without `jq` and with malformed payloads |
+| Phase 5 | The hooks, live | Verified in a session with no project `.claude/` at all — see below |
+| Phase 6 | `/kaizen:doctor` + compat registry | 73 checks; run against two real projects, where it found four agents with no frontmatter and one false positive of its own (since fixed and pinned) |
 
 ## Verified against a real project (2026-08-06)
 
@@ -178,7 +180,8 @@ These are warnings, not failures — deliberate, and visible on purpose:
 | ✓ done | Standards catalog with provenance | Templates are renderers over versioned rule data |
 | ✓ done | `/kaizen:analyze` reads the catalog | Reports by rule id over three populations, with provenance and a standards-status section |
 | ✓ done | Three hooks + asserted security baseline | Implemented, wired, 121 checks; 26 stubs deleted |
-| ← now | `/kaizen:doctor` | Claude Code version compatibility: the other half of "breaks nothing" |
+| ✓ done | `/kaizen:doctor` | Platform + config health, 73 checks; found real problems in a real project |
+| ← now | Content and cleanup, not architecture | 17 sourceless rules · `go`/`rust` presets · `kaizen.config.json` · decide when `next` ships |
 | | Monorepo shape, `kaizen.config.json`, go/rust presets | |
 
 ## Working agreements for this project

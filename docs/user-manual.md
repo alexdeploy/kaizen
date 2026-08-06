@@ -77,6 +77,7 @@ of querying it. It never guesses.
 | [`/kaizen:docs`](#kaizendocs) | report only | Which docs recent changes made stale |
 | [`/kaizen:bump`](#kaizenbump) | report only | Suggest a semver bump |
 | [`/kaizen:finish`](#kaizenfinish) | report only | The end-of-task ritual, all of the above |
+| [`/kaizen:doctor`](#kaizendoctor) **(unreleased)** | report only, or `--fix` | Is this setup actually working? |
 
 Two rules hold across all of them:
 
@@ -373,6 +374,64 @@ Bump and docs findings are **advisory** — they never block. Missing docs is yo
 call, not a merge blocker.
 
 ---
+
+## `/kaizen:doctor` **(unreleased)**
+
+Every other command assumes your configuration is valid. This one assumes it
+might not be — so it is the one to run when something is wrong, or when you
+inherit a project someone else set up.
+
+```
+/kaizen:doctor            # diagnose and report
+/kaizen:doctor --fix      # apply only the unambiguous fixes, asking first
+/kaizen:doctor --json     # raw findings, for scripting
+```
+
+### What it checks
+
+| Area | Examples |
+|---|---|
+| **The platform** | settings keys that are deprecated · hook event names that are **misspelled** — the worst config bug there is, because it never fires and never errors |
+| **References** | hooks and status lines pointing at scripts that do not exist, or that are not executable |
+| **Your config** | unparseable `settings.json`, an unsubstituted `{{PLACEHOLDER}}` still in `CLAUDE.md`, rules with no `paths:`, agents with no frontmatter |
+| **The lock** | missing, gitignored (so useless to your team), or missing baseline snapshots |
+| **Standards** | your config was generated against an older catalog than the one installed |
+| **Environment** | `git`, `python3`, `jq`, and what degrades without each |
+
+### Three severities, and the third one matters
+
+```
+kaizen doctor · WARNINGS
+
+  Problems (1)
+    ✗ `SessionStart` hook points at a file that does not exist
+      Claude Code reports an error on every session start until this is fixed.
+      → restore the script, or remove the hook block
+
+  Worth knowing (1)
+    ! CLAUDE.md is 340 lines
+      → move path-specific guidance into .claude/rules/
+
+  Not recognised (1)
+    · `someFutureKey` in .claude/settings.json
+      Not in kaizen's registry. That is not an error — it may be newer than
+      kaizen, or specific to your setup.
+```
+
+kaizen's registry of valid settings keys **cannot be complete**, so a key it does
+not know is reported as *unfamiliar*, never as invalid. A doctor that cries wolf
+the day Claude Code adds a key would be worse than no doctor.
+
+### `--fix` is deliberately narrow
+
+It applies only changes with exactly one correct outcome, one at a time, asking
+first: `chmod +x` a hook, repair the `.gitignore` so the lock is committed, align
+an agent's declared name to its filename, add a `paths:` block (**asking you for
+the globs** — it never guesses).
+
+Everything else stays a recommendation. Restoring a missing hook script means
+deciding whether you want that hook; splitting a long `CLAUDE.md` is an editorial
+call about your own conventions.
 
 ## What kaizen does without being asked
 

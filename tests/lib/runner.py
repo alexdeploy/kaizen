@@ -28,6 +28,7 @@ SUITES = [
     "lock",
     "standards",
     "safety",
+    "doctor",
 ]
 
 
