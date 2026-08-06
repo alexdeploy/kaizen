@@ -32,7 +32,12 @@ PLUGIN_DIR="$REPO_ROOT/plugins/kaizen"
 CLAUDE_BIN="${KZ_CLAUDE_BIN:-claude}"
 TIMEOUT_SECS="${KZ_LIVE_TIMEOUT:-600}"
 PYTHON="${KZ_PYTHON:-python3}"
-PERMISSION_MODE="${KZ_LIVE_PERMISSION_MODE:-acceptEdits}"
+# bypassPermissions, not acceptEdits: acceptEdits refuses writes under .claude/**,
+# which is the entire output of /kaizen:init — a live run under acceptEdits
+# produces CLAUDE.md and nothing else, and looks like a product failure. Safe
+# here because every scenario runs in a throwaway temp copy, never a real repo.
+# Verified against a real project (pnpm monorepo) on 2026-08-06.
+PERMISSION_MODE="${KZ_LIVE_PERMISSION_MODE:-bypassPermissions}"
 
 # scenario name | fixture | prompt | profile
 SCENARIOS=(
