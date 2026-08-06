@@ -9,6 +9,7 @@
 # The model reads this script's JSON and decides what to do about it.
 #
 #   kaizen-lock write [opts] <file>...   record files + snapshot them as baseline
+#     --placeholder KEY=VALUE  (repeatable) the value a placeholder resolved to
 #   kaizen-lock status                   classify every recorded file
 #   kaizen-lock merge <file> <new>       3-way merge via git merge-file
 #   kaizen-lock forget <file>...         stop tracking files
@@ -96,7 +97,7 @@ is_gitignored() {
 
 cmd_write() {
   local plugin_version="unknown" standards_version="unset" profile="unknown" preset="unknown"
-  local files=()
+  local files=() placeholders=()
 
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -108,12 +109,21 @@ cmd_write() {
       --standards-version=*) standards_version="${1#*=}"; shift ;;
       --profile=*)           profile="${1#*=}"; shift ;;
       --preset=*)            preset="${1#*=}"; shift ;;
+      --placeholder)         placeholders+=("$2"); shift 2 ;;
+      --placeholder=*)       placeholders+=("${1#*=}"); shift ;;
       -*) die "unknown option for write: $1" ;;
       *)  files+=("$1"); shift ;;
     esac
   done
 
   [ ${#files[@]} -gt 0 ] || die "write needs at least one file"
+
+  # Read the placeholders already on record before overwriting the lock.
+  local existing_placeholders="{}"
+  if [ -f "$LOCK_FILE" ]; then
+    existing_placeholders="$(sed -n 's/^[[:space:]]*"placeholders"[[:space:]]*:[[:space:]]*\({[^}]*}\).*/\1/p' \
+      "$LOCK_FILE" | head -1 | grep . || echo '{}')"
+  fi
 
   mkdir -p "$STATE_DIR" "$BASELINE_DIR"
 
@@ -159,6 +169,37 @@ cmd_write() {
     printf '  "standards_version": "%s",\n' "$(json_escape "$standards_version")"
     printf '  "profile": "%s",\n' "$(json_escape "$profile")"
     printf '  "preset": "%s",\n' "$(json_escape "$preset")"
+    # The values the placeholders resolved to. /kaizen:upgrade re-renders with
+    # THESE, not with fresh detection: a project that switched package manager
+    # would otherwise have every command line silently rewritten by an upgrade.
+    # A partial write (as /kaizen:upgrade does) must not drop the placeholders it
+    # did not repeat, for the same reason it must not drop untouched files.
+    printf '  "placeholders": {'
+    local first_ph=1 entry ph_key ph_val
+    while IFS=$'\t' read -r ph_key ph_val; do
+      [ -n "$ph_key" ] || continue
+      [ $first_ph -eq 1 ] || printf ','
+      first_ph=0
+      printf ' "%s": "%s"' "$(json_escape "$ph_key")" "$(json_escape "$ph_val")"
+    done < <(
+      {
+        # Existing entries first, new ones after: awk keeps the last seen value,
+        # so a repeated key is updated rather than duplicated.
+        # The trailing newline matters: without it the last existing entry and
+        # the first new one are concatenated into one line, awk sees three
+        # fields, drops it, and BOTH values are silently lost.
+        printf '%s\n' "$existing_placeholders" \
+          | tr ',' '\n' \
+          | sed -n 's/.*"\([A-Za-z_][A-Za-z0-9_]*\)"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1\t\2/p'
+        for entry in ${placeholders+"${placeholders[@]}"}; do
+          [ -n "$entry" ] || continue
+          printf '%s\t%s\n' "${entry%%=*}" "${entry#*=}"
+        done
+      } | awk -F'\t' 'NF==2 { v[$1]=$2 } END { for (k in v) print k "\t" v[k] }' \
+        | LC_ALL=C sort
+    )
+    [ $first_ph -eq 1 ] || printf ' '
+    printf '},\n'
     printf '  "files": [\n'
     local first=1
     while IFS=$'\t' read -r path hash; do
@@ -243,6 +284,7 @@ cmd_status() {
   printf '  "profile": "%s",\n' "$(lock_field profile || echo unknown)"
   printf '  "preset": "%s",\n' "$(lock_field preset || echo unknown)"
   printf '  "generated": "%s",\n' "$(lock_field generated || echo unknown)"
+  printf '  "placeholders": %s,\n' "$(sed -n 's/^[[:space:]]*"placeholders"[[:space:]]*:[[:space:]]*\({[^}]*}\).*/\1/p' "$LOCK_FILE" | head -1 | grep . || echo '{}')"
   printf '  "summary": { "unchanged": %d, "modified": %d, "deleted": %d, "missing_baseline": %d },\n' \
     "$unchanged" "$modified" "$deleted" "$no_baseline"
   printf '  "files": [\n'
@@ -324,7 +366,8 @@ cmd_forget() {
   kept="$(mktemp)"
   lock_entries | awk -F'\t' 'NR==FNR { gone[$0]=1; next } !($1 in gone)' "$drop" - > "$kept"
 
-  local plugin_version standards_version profile preset
+  local plugin_version standards_version profile preset placeholders_json
+  placeholders_json="$(sed -n 's/^[[:space:]]*"placeholders"[[:space:]]*:[[:space:]]*\({[^}]*}\).*/\1/p' "$LOCK_FILE" | head -1 | grep . || echo '{}')"
   plugin_version="$(lock_field plugin_version || echo unknown)"
   standards_version="$(lock_field standards_version || echo unset)"
   profile="$(lock_field profile || echo unknown)"
@@ -338,6 +381,7 @@ cmd_forget() {
     printf '  "standards_version": "%s",\n' "$standards_version"
     printf '  "profile": "%s",\n' "$profile"
     printf '  "preset": "%s",\n' "$preset"
+    printf '  "placeholders": %s,\n' "$placeholders_json"
     printf '  "files": [\n'
     local first=1
     while IFS=$'\t' read -r path hash; do

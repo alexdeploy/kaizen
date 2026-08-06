@@ -33,7 +33,7 @@ The `--profile=<level>` flag controls how much of kaizen's **advanced workflow**
 | Profile | What it adds beyond base bootstrap |
 |---|---|
 | `minimal` | **Nothing extra**. Identical to v0.6 output — just CLAUDE.md, settings, 1 rule, code-reviewer agent, 2 hooks. Use for throwaway projects or when you don't want kaizen surfacing workflow recommendations. |
-| `standard` (default) | Adds `.claude/rules/workflow.md` documenting the kaizen-enabled workflow (when to run `/kaizen:learn`, `/analyze`, `/preflight`, `/docs`, `/bump`, `/finish`). Adds a "Workflow" section to CLAUDE.md mentioning these skills. **No automation forced** — the user invokes skills manually. |
+| `standard` (default) | Adds `.claude/rules/workflow.md` documenting the kaizen-enabled workflow. Appends the **verbatim contents of `templates/_shared/CLAUDE.workflow.md`** to `CLAUDE.md` — do NOT compose that prose yourself; two runs would produce different files and an upgrade could not tell a template change from an invention. **No automation forced** — the user invokes skills manually. |
 | `advanced` | Standard + a more detailed `.claude/rules/workflow-advanced.md` with the **end-of-task ritual** (recommend `/kaizen:finish` before every commit). Adds a stack-specific **Versioning** section to CLAUDE.md (changesets if monorepo, direct manifest bump otherwise). |
 
 The plugin's new skills (`/kaizen:docs`, `/kaizen:bump`, `/kaizen:finish`) and agents (`docs-keeper`, `versioner`) are **always available** when the kaizen plugin is installed, regardless of profile. The profile only controls whether the user's `CLAUDE.md` and rules **document** them as part of the recommended workflow.
@@ -297,6 +297,7 @@ These are the ONLY content removals you may perform beyond substitution and enri
 | `no_build` | No `build` script in `package.json` | In CLAUDE.md `## Commands`, remove the `Build: ...` line. |
 | `no_package_manager` | `PACKAGE_MANAGER == "none"` | In CLAUDE.md `## Commands`, replace all `{{PACKAGE_MANAGER}}`-prefixed lines with: `<!-- No package manager detected. Add commands here once one is chosen. -->` |
 | `dev_script_present` | Project has `dev` script but template has no `Dev:` line | In CLAUDE.md `## Commands`, insert `Dev: {{PACKAGE_MANAGER}} run dev` after `Install`. |
+| `no_lint` | No `lint` script in the **root** manifest | In CLAUDE.md `## Commands`, remove the `Lint: ...` line. Same reasoning as `no_format`. |
 | `no_format` | No `format` script in the **root** manifest | In CLAUDE.md `## Commands`, remove the `Format: ...` line. A command that does not exist is worse than a missing one: it is in the first section Claude reads every session. |
 | `workspace_scripts` | `detect.workspaces.type != "none"` AND a command's script is missing from the root manifest but present in a member | Keep the line, and append ` (run per package: <pm> --filter <pkg> <script>)`. Report which member you took it from. Do **not** invent a root script that does not exist. |
 
@@ -408,7 +409,9 @@ If `--profile=standard` (default) or `--profile=advanced`, **additionally** gene
 .claude/rules/workflow.md   # documents the kaizen-skill workflow
 ```
 
-Append to `CLAUDE.md` a new `## Workflow` section that lists the kaizen skills (`/kaizen:learn`, `/analyze`, `/preflight`, `/docs`, `/bump`, `/finish`) and when to run each. Use the content from `templates/_shared/workflow.md` as the source of truth — substitute placeholders the same as other files.
+Append to `CLAUDE.md` the **verbatim contents** of `templates/_shared/CLAUDE.workflow.md`, substituting placeholders the same as any other file. Do not compose this section yourself and do not reword it: two runs would produce different prose, and `/kaizen:upgrade` could then not tell a template change from an invention.
+
+(The path-scoped rule file is a different artifact: `templates/_shared/.claude/rules/workflow.md`, written to `.claude/rules/workflow.md`.)
 
 If `--profile=advanced`, **additionally** generate:
 
@@ -483,8 +486,15 @@ from one they never touched, and the only options are "overwrite your work" or
 Run via **Bash tool**, passing every file you created or overwrote in this run:
 
 ```
-kaizen-lock write --plugin-version <version from plugin.json> --profile <profile> --preset <preset> CLAUDE.md .claude/settings.json .claude/rules/<...> .claude/agents/<...> .claude/hooks/<...>
+kaizen-lock write --plugin-version <version from plugin.json> --standards-version <from kaizen-standards version> --profile <profile> --preset <preset> --placeholder PROJECT_NAME=<value> --placeholder PACKAGE_MANAGER=<value> --placeholder TEST_RUNNER=<value> --placeholder STACK_FRIENDLY=<value> CLAUDE.md .claude/settings.json .claude/rules/<...> .claude/agents/<...> .claude/hooks/<...>
 ```
+
+Pass `--placeholder KEY=VALUE` for **every placeholder you substituted**, with the
+value you actually used. This is not bookkeeping for its own sake: `/kaizen:upgrade`
+re-renders from these recorded values rather than from fresh detection, so a
+project that later grows a `pnpm-lock.yaml` does not silently have every command
+line rewritten by an upgrade. Also pass `--standards-version` so staleness can be
+computed later.
 
 Rules:
 

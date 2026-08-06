@@ -91,9 +91,29 @@ Read `plugin_version` from the lock and the current plugin's `plugin.json`.
 ### 3. Render what the current templates would produce
 
 For each tracked file, produce today's version **exactly the way `/kaizen:init`
-would**: same preset, same profile, same placeholder substitution, same
-enrichment directives. Read `profile` and `preset` from the lock so the
-comparison is apples to apples — do not re-detect and silently change them.
+would**: same preset, same profile, same placeholder values, same enrichment
+directives.
+
+**Take `profile`, `preset` and `placeholders` from the lock, not from fresh
+detection.** An upgrade updates template content; it does not re-decide what the
+project is. A project generated with `npm` that has since grown a
+`pnpm-lock.yaml` must not have every command line rewritten as a side effect of
+adopting a template change — that is exactly the surprise this skill exists to
+prevent.
+
+When today's detection disagrees with a recorded placeholder, say so in the plan
+as **advice**, never as a change:
+
+```
+  Detection drift (not applied)
+    PACKAGE_MANAGER   recorded `npm`, detected `pnpm`
+      Rendered with `npm`. If pnpm is correct this is a
+      /kaizen:init --force decision, not an upgrade one.
+```
+
+If the lock has no `placeholders` (written before v0.14), infer them from the
+baseline snapshots where possible, and list every value you had to infer in the
+plan. Never fall back to fresh detection silently.
 
 Write each rendered file to a scratch path (e.g. `.claude/kaizen/upgrade-tmp/`)
 so nothing lands in the project during planning.
@@ -171,9 +191,12 @@ Rules for the plan:
    by judgement — the user's config is not yours to arbitrate.**
 4. Re-record the lock for every file you wrote:
    ```
-   kaizen-lock write --plugin-version <new> --profile <profile> --preset <preset> <files written>
+   kaizen-lock write --plugin-version <new> --standards-version <current catalog> --profile <profile> --preset <preset> --placeholder KEY=VALUE ... <files written>
    ```
-   Files left alone keep their old entry; the script merges rather than replaces.
+   Pass the **same placeholder values you rendered with** (the recorded ones, not
+   freshly detected ones) so the next upgrade starts from the same footing.
+   Files left alone keep their old entry, and placeholders you do not repeat keep
+   their recorded value — the script merges rather than replaces.
 5. Delete `.claude/kaizen/upgrade-tmp/`.
 6. Print a report in the same shape as the plan, past tense, plus:
    ```

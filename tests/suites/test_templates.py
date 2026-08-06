@@ -13,6 +13,7 @@ Both are invisible in review and only surface in a user's project.
 
 import json
 import os
+import re
 
 import kzparse as P
 
@@ -93,6 +94,16 @@ def run(r):
             r.ok("%s is valid JSON" % P.rel(path))
         except ValueError as exc:
             r.fail("%s is not valid JSON" % P.rel(path), exc)
+
+    # --- prose the skill appends must come from a file --------------------
+    # A run that composes this section itself produces different output every
+    # time, so /kaizen:upgrade cannot tell a template change from an invention.
+    init_skill = P.read(os.path.join(P.SKILLS_DIR, "init", "SKILL.md"))
+    for referenced in re.findall(r"templates/(_shared/[A-Za-z0-9_.\-]+\.md)", init_skill):
+        r.check(
+            os.path.isfile(os.path.join(P.TEMPLATES_DIR, referenced)),
+            "init/SKILL.md references a template that exists (%s)" % referenced,
+        )
 
     # --- every stack the detector emits maps to a real preset -------------
     mapping = P.config("stack-presets.json")["stack_to_preset"]

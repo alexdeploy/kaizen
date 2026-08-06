@@ -42,9 +42,89 @@ def run(r):
     _test_forget(r)
     _test_no_lock(r)
     _test_gitignore_awareness(r)
+    _test_placeholder_recording(r)
 
 
 # --------------------------------------------------------------- scenarios ---
+
+
+def _test_placeholder_recording(r):
+    """The values placeholders resolved to must survive, or upgrade re-renders wrong.
+
+    A project generated with `npm` that later grows a `pnpm-lock.yaml` must not
+    have every command line silently rewritten by an upgrade. Recording the
+    resolved values is what lets /kaizen:upgrade re-render faithfully and report
+    the detection drift as advice instead of acting on it.
+    """
+    with _project() as project:
+        _seed(project, {"CLAUDE.md": "a\n", "B.md": "b\n"})
+
+        out = _lock(r, project, ["write", "--placeholder", "PACKAGE_MANAGER=npm",
+                                 "--placeholder", "TEST_RUNNER=vitest", "CLAUDE.md"])
+        if out is None:
+            return
+        lock = _load_lock(r, project)
+        if lock is None:
+            return
+        r.check(
+            lock.get("placeholders") == {"PACKAGE_MANAGER": "npm",
+                                        "TEST_RUNNER": "vitest"},
+            "write records the values placeholders resolved to",
+            json.dumps(lock.get("placeholders")),
+        )
+
+        # A partial write (what upgrade does) updates what it names and keeps the
+        # rest — same contract as files.
+        _lock(r, project, ["write", "--placeholder", "PACKAGE_MANAGER=pnpm", "B.md"])
+        lock = _load_lock(r, project)
+        if lock is None:
+            return
+        r.check(
+            lock.get("placeholders") == {"PACKAGE_MANAGER": "pnpm",
+                                        "TEST_RUNNER": "vitest"},
+            "a partial write updates one placeholder and keeps the others",
+            json.dumps(lock.get("placeholders")),
+        )
+
+        _lock(r, project, ["write", "CLAUDE.md"])
+        lock = _load_lock(r, project)
+        if lock is None:
+            return
+        r.check(
+            lock.get("placeholders") == {"PACKAGE_MANAGER": "pnpm",
+                                        "TEST_RUNNER": "vitest"},
+            "a write naming no placeholder keeps every recorded value",
+            json.dumps(lock.get("placeholders")),
+        )
+
+        _lock(r, project, ["forget", "B.md"])
+        lock = _load_lock(r, project)
+        if lock is None:
+            return
+        r.check(
+            lock.get("placeholders") == {"PACKAGE_MANAGER": "pnpm",
+                                        "TEST_RUNNER": "vitest"},
+            "forget does not drop the recorded placeholders",
+            json.dumps(lock.get("placeholders")),
+        )
+
+        status = _lock(r, project, ["status"])
+        if status is not None:
+            r.check(
+                status.get("placeholders", {}).get("PACKAGE_MANAGER") == "pnpm",
+                "status surfaces the placeholders so upgrade reads them in one call",
+                json.dumps(status.get("placeholders")),
+            )
+
+
+def _load_lock(r, project):
+    path = os.path.join(project, ".claude/kaizen/lock.json")
+    try:
+        with open(path) as fh:
+            return json.load(fh)
+    except (IOError, ValueError) as exc:
+        r.fail("lock.json is readable after the operation", exc)
+        return None
 
 
 def _test_write_and_status(r):
