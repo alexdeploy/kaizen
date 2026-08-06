@@ -18,8 +18,10 @@ import kzparse as P
 # Scripts that are intentionally not stubs.
 NON_STUB_SCRIPTS = {"subagent-statusline.sh"}
 
-# Hook scripts that have been implemented and wired. Empty by design in v0.12.
-ACTIVE_HOOKS = set()
+# Hook scripts that are implemented and wired in hooks.json. Adding one here is
+# the deliberate act that lets it ship: the suite refuses to run stub checks
+# against it, and demands hooks.json reference nothing outside this set.
+ACTIVE_HOOKS = {"pre-tool-use.sh", "session-start.sh", "stop.sh"}
 
 STUB_MARKERS = ("hook stub", "no-op stub")
 
@@ -128,7 +130,11 @@ def run(r):
                 "implemented a hook? add it to ACTIVE_HOOKS in tests/suites/test_hooks.py",
             )
     else:
-        r.ok("no hooks.json — kaizen activates zero hooks by default")
+        r.fail(
+            "hooks.json is missing but ACTIVE_HOOKS declares implemented hooks",
+            "declared active: %s" % ", ".join(sorted(ACTIVE_HOOKS)),
+        ) if ACTIVE_HOOKS else r.ok(
+            "no hooks.json — kaizen activates zero hooks by default")
 
 
 def _commands(config):

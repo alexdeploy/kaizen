@@ -196,9 +196,15 @@ CLAUDE.md
 
 ```json
 {
+  "project_name": "my-app",
   "stack": "typescript,frontend",
   "package_manager": "pnpm",
   "maturity": "small",
+  "workspaces": {
+    "type": "pnpm",
+    "packages": ["backend", "frontend"],
+    "count": 2
+  },
   "git": {
     "is_repo": true,
     "commits": 47,
@@ -213,7 +219,11 @@ CLAUDE.md
 
 | Field | Type | Possible values |
 |---|---|---|
-| `stack` | string (CSV) | `generic` \| `typescript` \| `javascript` \| `python` \| `go` \| `rust` \| `java` \| `ruby` \| `php` \| `elixir` (optionally `+frontend`, `+backend-node`) |
+| `project_name` | string | The manifest's own `name`; falls back to `basename(cwd)`. Never the directory name when a manifest exists — see [ADR-0007](./decisions/0007-monorepo-is-a-shape.md) |
+| `workspaces.type` | string | `pnpm` \| `npm` \| `lerna` \| `turbo` \| `nx` \| `cargo` \| `go` \| `none` |
+| `workspaces.packages` | string[] | Workspace globs expanded to directories holding a manifest, sorted |
+| `workspaces.count` | int | Length of `packages` |
+| `stack` | string (CSV) — scanned from the root manifest **and every workspace member** | `generic` \| `typescript` \| `javascript` \| `python` \| `go` \| `rust` \| `java` \| `ruby` \| `php` \| `elixir` (optionally `+frontend`, `+backend-node`) |
 | `package_manager` | string | `pnpm` \| `yarn` \| `bun` \| `npm` \| `uv` \| `poetry` \| `pipenv` \| `pip` \| `none` |
 | `maturity` | string | `empty` (0 src files) \| `scaffold` (1-5) \| `small` (6-50) \| `mature` (50+) |
 | `git.is_repo` | bool | true / false |
@@ -1416,3 +1426,388 @@ Customizations applied: ...
 ```
 
 This is a substantial scaffold (~19 files). The user gets an opinionated, working dev environment in one command.
+
+---
+
+# 17. The configuration lock + `/kaizen:upgrade` runtime (v0.13.0)
+
+> Every skill up to this point either generates config or reads it. This one
+> **updates** it, which is a categorically harder problem: the file kaizen wants
+> to change is a file the user may have made their own.
+
+## The problem it solves
+
+Before the lock, kaizen had exactly two answers to "the templates improved,
+what about existing projects?":
+
+1. `--force` — overwrite. Destroys customisations.
+2. Nothing — leave the project on whatever it got the day it was initialised.
+
+Both are wrong, and the second is why scaffolders get run once and abandoned.
+The missing capability was not merging; it was **knowing**. kaizen could not
+tell "the user never touched this file" from "the user rewrote it", because it
+kept no record of what it had produced.
+
+## The record
+
+`/kaizen:init` step 7 calls `kaizen-lock write`, which produces two artifacts:
+
+```
+.claude/kaizen/
+├── lock.json          ← what was written, by which plugin version, with what hash
+└── baseline/          ← a verbatim copy of each generated file
+    ├── CLAUDE.md
+    └── .claude/...
+```
+
+```json
+{
+  "lock_version": 1,
+  "generated": "2026-08-05T21:19:19Z",
+  "plugin_version": "0.13.0",
+  "standards_version": "unset",
+  "profile": "standard",
+  "preset": "typescript-node",
+  "files": [
+    { "path": "CLAUDE.md", "sha256": "173f954c…" }
+  ]
+}
+```
+
+**Both are meant to be committed.** They are the project's record of its own
+configuration provenance, exactly like `package-lock.json`. This is why the
+`.gitignore` template ignores `.claude/kaizen/*` but negates `lock.json` and
+`baseline/` — the reports and plans are transient, the lock is not.
+
+The hash answers "did the user change this?". The baseline answers the harder
+question: "changed *from what?*" — without it there is no merge base, and no
+merge.
+
+## Why a script and not the model
+
+`kaizen-lock` is deterministic bash for the same reason `kaizen-detect` is, only
+more so. A model that computes SHA-256 by hand is wrong; a model that merges
+two versions of a file by hand produces **plausible-looking corruption**, which
+is the worst possible failure for a tool whose entire promise is "does not break
+anything".
+
+The division of labour:
+
+| Job | Owner |
+|---|---|
+| Hashing, snapshotting, classifying files | `kaizen-lock` (bash) |
+| The actual 3-way merge | `git merge-file` |
+| Deciding *what to do* about a conflict | The user, prompted by the skill |
+| Rendering today's template output | The model, exactly as `/kaizen:init` does |
+
+Merging is a solved problem with an implementation on every machine that has
+git. kaizen does not reimplement it.
+
+## The three states
+
+```
+                    kaizen-lock status
+                            │
+        ┌───────────────────┼───────────────────┐
+        ▼                   ▼                   ▼
+   unchanged             modified            deleted
+ hash == recorded    hash != recorded     file absent
+        │                   │                   │
+        ▼                   ▼                   ▼
+  replace silently   3-way merge via      leave deleted
+                     git merge-file       (a deletion is
+                            │              a decision)
+                ┌───────────┴───────────┐
+                ▼                       ▼
+          clean (0 conflicts)     conflicts > 0
+          apply automatically     ask the user:
+                                  keep yours / take theirs /
+                                  write markers
+```
+
+A file that is **not in the lock is not kaizen's**, and is never touched — even
+when it sits at a path kaizen would normally generate.
+
+## `kaizen-lock` interface
+
+| Subcommand | Does | Exit |
+|---|---|---|
+| `write [--plugin-version V] [--profile P] [--preset P] <file>…` | Hash + snapshot each file; merge into any existing lock (a partial write never drops untouched entries) | 0 |
+| `status` | Classify every recorded file; JSON with per-file state and a summary | 0 (also when no lock exists — `/upgrade` branches on that, it is not an error) |
+| `merge <tracked> <incoming>` | 3-way merge into a temp file; reports conflict count. **Writes nothing into the project** | 0 merged · 3 no baseline · 4 deleted by user |
+| `forget <file>…` | Stop tracking; drop the baseline snapshot | 0 |
+
+Every subcommand emits JSON on stdout. The `write` output includes
+`lock_is_gitignored`, which `/kaizen:init` and `/kaizen:upgrade` use to repair a
+`.gitignore` that would exclude the lock from version control.
+
+## `/kaizen:upgrade` phases
+
+1. **Read the lock.** No lock → stop with adoption instructions. Never fall back
+   to overwriting.
+2. **Compare versions.** Same version + modified files is *drift*, not an
+   upgrade — reported, not merged. A lock newer than the installed plugin means
+   the user downgraded: refuse.
+3. **Render** what today's templates produce, using the profile and preset
+   **recorded in the lock**, into a scratch directory. An upgrade changes
+   content, not identity.
+4. **Classify** each file and merge the modified ones.
+5. **Plan.** Print what would happen, showing substance ("your `no moment.js`
+   rule kept, new `Lint` line added"), not just filenames. Writes nothing.
+6. **Apply**, only when explicitly asked, only on a clean git tree, asking per
+   conflict, then re-recording the lock and printing the `git diff` / `git
+   checkout` commands to review or undo.
+
+## Boundaries
+
+**`/kaizen:upgrade` writes** (only in `apply` mode): files already recorded in
+the lock, `.claude/kaizen/lock.json` and its baselines, `.gitignore` (to
+un-ignore the lock).
+
+**It never**: touches a file absent from the lock, overwrites a modified file
+without merging, resurrects a deleted file, resolves a conflict on the user's
+behalf, commits, or changes the recorded profile/preset.
+
+## Why this is the architecturally important piece
+
+Every other ambition in [ROADMAP.md](../ROADMAP.md) depends on it. A versioned
+standards catalog is only useful if projects can *move between versions*
+safely. A `/kaizen:doctor` that detects stale configuration needs a safe way to
+fix it. Without the lock, each of those degrades back into "overwrite and hope".
+
+---
+
+# 18. The standards catalog (v0.13.0)
+
+> Where the rules in a user's `CLAUDE.md` come from, why each one exists, and
+> how they change without a plugin release. Decision record:
+> [ADR-0005](./decisions/0005-standards-as-versioned-data.md).
+
+## What changed
+
+Before: a convention was a line of prose inside a template.
+
+```markdown
+## Conventions
+- **No `any`.** Use `unknown` and narrow.
+```
+
+After: a convention is a rule in a versioned catalog, and the template holds a
+marker where the applicable rules get rendered.
+
+```markdown
+## Conventions
+
+<!-- KAIZEN_STANDARDS:claude_md.conventions -->
+```
+
+The prose is now **data with provenance**:
+
+```json
+{
+  "id": "TS-003",
+  "statement": "**No `any`.** Use `unknown` and narrow.",
+  "rationale": "`any` disables checking for every expression it touches, and it spreads…",
+  "sources": [{ "label": "TypeScript Handbook — unknown", "url": "…" }],
+  "added": "2026-08-05",
+  "severity": "convention",
+  "applies_to": { "stack": ["typescript"], "maturity": ["scaffold", "small", "mature"] },
+  "surface": "claude_md.conventions",
+  "check": { "type": "grep", "pattern": ": any\\b|\\bas any\\b", "include": ["*.ts"], "exclude": ["*.d.ts"] }
+}
+```
+
+## The three problems this solves
+
+1. **Release coupling.** The catalog is versioned separately
+   (`standards_version: "2026.08"`, calendar versioning because freshness is the
+   point). Practices can ship without a plugin release.
+2. **Unarguable rules.** Every rule carries a rationale, a source and a date, so
+   a team can evaluate it instead of just obeying or deleting it. Rules that
+   still lack a source are reported by the harness on every run — currently 17
+   of 31, which is a real debt made visible rather than hidden.
+3. **Statement and check drifting apart.** The rule text lived in a template;
+   the check that verified it lived in `analyze/SKILL.md`'s pattern library,
+   joined by case-insensitive substring matching. Rewording a convention
+   silently un-checked it. Now the statement and its check are one object with a
+   stable id.
+
+## Layout
+
+```
+plugins/kaizen/standards/
+├── index.json        version, surfaces, severities, statuses, check types
+├── universal.json    UNI-*  stack-agnostic
+├── typescript.json   TS-*
+└── python.json       PY-*
+```
+
+**Surfaces** are the places a rule can render. Adding one means declaring it in
+`index.json` *and* placing the marker in a template — the harness checks both
+directions.
+
+| Surface | Target |
+|---|---|
+| `claude_md.conventions` | `CLAUDE.md` → `## Conventions` |
+| `claude_md.never` | `CLAUDE.md` → `## Never do` |
+| `rules_testing.conventions` | `.claude/rules/testing.md` → `## Conventions` |
+| `rules_testing.never` | `.claude/rules/testing.md` → `## Never` |
+
+## `kaizen-standards`
+
+Python 3, stdlib only ([ADR-0006](./decisions/0006-python-for-structured-runtime-scripts.md)).
+
+| Subcommand | Purpose |
+|---|---|
+| `version` | Catalog version and counts |
+| `list [filters]` | Matching rules, table or `--json` |
+| `show <ID>` | One rule in full — the traceability path from a line in `CLAUDE.md` back to its reasoning |
+| `render --surface S --stack S --maturity M` | **The one the skills use.** Deterministic markdown lines, ready to paste at a marker |
+| `checks [--stack S]` | Rules `/kaizen:analyze` can verify, with their patterns |
+
+`render` is deterministic by design: domain order follows `index.json`, rules
+sort by id inside a domain. An unstable order would make every `/kaizen:upgrade`
+show phantom changes for files nobody touched.
+
+Exit code 1 from `render` means *no rule applies* — an unknown stack, or a
+project too young for a rule's `maturity`. `/kaizen:init` falls back to the
+template's placeholder rather than shipping an empty section.
+
+## Rule refinement
+
+A stack-specific rule may declare `refines: <ID>`:
+
+```
+UNI-004  "Errors are typed. Throw domain-specific error types…"
+   ↑ refined by
+TS-005   "Errors are typed. Throw Error subclasses, not strings."
+```
+
+When both would render into the same project, the general one is suppressed. A
+TypeScript project is told the precise thing once, not the vague thing plus the
+precise thing. The general rule still renders for stacks with no specialisation.
+
+This was found by running the renderer, not by reading it — the first render of
+a TypeScript project emitted both lines.
+
+## Traceability
+
+Every rendered line carries its id:
+
+```markdown
+- **No `any`.** Use `unknown` and narrow. <!-- TS-003 -->
+```
+
+Costing roughly five tokens per rule in a file loaded every session, paid
+deliberately: it is what lets `/kaizen:analyze` check the right rule, what lets
+`/kaizen:upgrade` recognise a rule that moved, and what lets a user run
+`kaizen-standards show TS-003` and read *why*.
+
+## What the harness guards
+
+`tests/suites/test_standards.py`, 873 checks:
+
+- Schema completeness on every rule, unique well-formed ids, ISO dates.
+- `severity` / `status` / `surface` / `check.type` all declared in `index.json`.
+- `applies_to.stack` values are tokens `kaizen-detect` can actually emit.
+- `refines` and `deprecated_by` point at rules that exist.
+- Every check pattern compiles **and is compatible with ripgrep** — no
+  lookaround, no backreferences. A pattern that compiles in Python but fails in
+  the Grep tool is a check that silently never runs; one such pattern existed
+  and was caught here.
+- Markers in templates and surfaces in the index agree, in both directions.
+- `render` is deterministic, ids are attached, refinement suppression works,
+  and the empty case exits 1.
+- Rules with no source are reported (warning) rather than quietly accepted.
+
+---
+
+# 19. `/kaizen:analyze` on the catalog (v0.13.0)
+
+> Supersedes the pattern-library description in §11. Decision record:
+> [ADR-0008](./decisions/0008-analyze-reports-by-rule-id.md).
+
+## What changed
+
+`--best-practices` used to match a convention's **prose** against a keyword table
+hardcoded in `analyze/SKILL.md`. The rule and its check were separate objects
+joined by case-insensitive substring similarity, so rewording a convention
+silently disabled its verification — no error, no warning, no way to notice.
+
+Now the id in the generated line is the join key:
+
+```markdown
+- **No `any`.** Use `unknown` and narrow. <!-- TS-003 -->
+```
+
+```
+kaizen-standards checks --stack backend-node,frontend,typescript --maturity mature
+```
+
+The keyword table is deleted, and a harness check fails the build if any catalog
+pattern reappears inside the skill.
+
+## Three populations
+
+The load-bearing distinction of this mode. Mixing them turns an audit into an
+argument.
+
+```
+      every bullet under ## Conventions / ## Never do
+                          │
+      ┌───────────────────┼───────────────────────┐
+      ▼                   ▼                       ▼
+  ends with           no id comment        in the catalog for this
+  <!-- ID -->                              stack, but no line has its id
+      │                   │                       │
+      ▼                   ▼                       ▼
+  A · catalog rule    B · the user's own      C · not adopted
+  verify with its     NOT kaizen's to         a GAP, never a
+  own check; report   judge. One exact        violation. Prompts
+  id + rationale      text match tried,       /kaizen:upgrade
+  + source            then unchecked
+```
+
+## Standards status
+
+The section that makes "always up to date" answerable rather than aspirational.
+Three questions, all answered from data already on disk:
+
+| Question | Source |
+|---|---|
+| Which rules in my config are deprecated? | `kaizen-standards show <ID>` → `status`, `deprecated_by` |
+| Which ids no longer exist at all? | absent from the catalog → config predates a change, or was hand-edited |
+| Which rules exist that I never had? | `kaizen-standards list --added-after <lock standards_version>` |
+
+The third needs the lock's `standards_version`, which is why
+[ADR-0002](./decisions/0002-configuration-lock.md) had to come first. Without a
+lock, staleness cannot be computed and the report says so instead of guessing.
+
+## Provenance in findings
+
+Each violation reports severity, id, the matching line, the first sentence of the
+rule's `rationale`, and its first source link — all fields already present in the
+object being read, so the cost is formatting:
+
+```
+#### [safety] PY-008 — No bare `except:`
+`backend/src/features/scan/ocr.py:142`
+> A bare except also catches `KeyboardInterrupt` and `SystemExit`, so it makes
+> a program that cannot be stopped.
+Source: PEP 8 — Programming Recommendations · https://peps.python.org/pep-0008/…
+```
+
+## Two limitations, both surfaced rather than hidden
+
+**Globs must be depth-agnostic.** A directory glob without a `**/` prefix anchors
+to the repository root, so in a workspace `scripts/**` never excludes
+`backend/src/scripts/`. Running TS-004 against a real monorepo produced **36
+violations in CLI scripts the rule was written to ignore**; honouring the exclude
+correctly gives 0. All 38 affected globs now carry `**/`, and the harness rejects
+any glob containing `/` that does not.
+
+**Grep has no comment awareness.** TS-003's pattern matches `: any` inside prose.
+On the same real project its single hit was the comment
+`Crude heuristic: any CJK char`. The rule carries a `note` saying so, and the
+skill is required to print a check's note alongside its findings. A limitation
+shown is worth more than a clean-looking report that cannot be trusted.

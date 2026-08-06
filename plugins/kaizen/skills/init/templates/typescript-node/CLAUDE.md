@@ -24,11 +24,7 @@
 
 ## Conventions
 
-- **Named exports only.** No default exports.
-- **Tests next to source**: `foo.ts` → `foo.test.ts`. Integration tests in `tests/`.
-- **No `any`.** Use `unknown` and narrow.
-- **No `console.log` in committed code.** Use a logger.
-- **Errors are typed.** Throw `Error` subclasses, not strings.
+<!-- KAIZEN_STANDARDS:claude_md.conventions -->
 
 ## Architecture (brief)
 
@@ -38,7 +34,5 @@ For path-specific conventions, see [.claude/rules/](./.claude/rules/).
 
 ## Never do
 
-- No direct commits to `main` / `master`.
-- No editing `dist/` or `build/` by hand.
-- No new runtime dependencies without justification.
-- No `eslint-disable` without a comment explaining why.
+<!-- KAIZEN_STANDARDS:claude_md.never -->
+

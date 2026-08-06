@@ -76,6 +76,45 @@ def run(r):
                     "tests/suites/test_references.py",
                 )
 
+    # --- the user manual must know about every shipped skill --------------
+    # The failure this prevents: five phases of work landed while user-manual.md
+    # still described v0.12.0. Documentation drifting behind the product is the
+    # exact criticism this project was started to answer.
+    manual = os.path.join(P.REPO_ROOT, "docs", "user-manual.md")
+    if os.path.isfile(manual):
+        manual_text = P.read(manual)
+        for skill in sorted(skill_names):
+            r.check(
+                "/kaizen:%s" % skill in manual_text,
+                "docs/user-manual.md documents /kaizen:%s" % skill,
+                "a shipped command absent from the manual does not exist to users",
+            )
+        for binary in sorted(os.listdir(os.path.join(P.PLUGIN_ROOT, "bin"))):
+            r.check_warn(
+                binary in manual_text or binary in P.read(
+                    os.path.join(P.REPO_ROOT, "docs", "technical-manual.md")),
+                "the manuals mention the `%s` executable" % binary,
+            )
+
+    # --- every ADR is indexed --------------------------------------------
+    decisions_dir = os.path.join(P.REPO_ROOT, "docs", "decisions")
+    if os.path.isdir(decisions_dir):
+        index = P.read(os.path.join(decisions_dir, "README.md"))
+        for name in sorted(os.listdir(decisions_dir)):
+            if not name.endswith(".md") or name == "README.md":
+                continue
+            r.check(
+                name in index,
+                "ADR %s appears in the decisions index" % name,
+                "an unindexed decision is one nobody will find",
+            )
+            body = P.read(os.path.join(decisions_dir, name))
+            for heading in ("## Context", "## Decision", "## Consequences"):
+                r.check(
+                    heading in body,
+                    "%s has a `%s` section" % (name, heading),
+                )
+
     # --- relative markdown links resolve ---------------------------------
     md_files = [os.path.join(P.REPO_ROOT, d) for d in DOC_FILES]
     md_files += sorted(P.walk_files(os.path.join(P.REPO_ROOT, "docs"), [".md"]))

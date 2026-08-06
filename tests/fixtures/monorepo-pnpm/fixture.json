@@ -1,0 +1,3 @@
+{
+  "_comment": "Mirrors the shape of a real project this was tested against: a pnpm workspace whose ROOT package.json carries no framework or language dependency at all. Before workspace scanning, this detected as `javascript` with no frontend/backend token, and the TypeScript-only rules were silently never rendered. The glob `frontend/plugins/*` must expand."
+}

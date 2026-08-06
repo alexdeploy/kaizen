@@ -1,0 +1,1 @@
+{ "name": "@acme/backend", "dependencies": { "express": "^5.0.0", "mongoose": "^9.0.0" }, "devDependencies": { "typescript": "^5.4.0" } }

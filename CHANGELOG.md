@@ -10,6 +10,329 @@ While v0.x, **minor versions may include breaking changes**. From v1.0.0 onward,
 
 ## [Unreleased]
 
+Nothing yet. See [ROADMAP.md](./ROADMAP.md) and [HANDOFF.md](./HANDOFF.md).
+
+---
+
+## [0.13.0] — 2026-08-06
+
+**The release that turns kaizen from a scaffolder into a configuration package
+manager.** Six phases, ten decision records, and a validation harness that did
+not exist before: the plugin went from zero automated verification to ~1.800
+deterministic checks plus six live behaviour evals.
+
+Read [ROADMAP.md](./ROADMAP.md) for the argument, and
+[docs/decisions/](./docs/decisions/README.md) for each decision with the
+alternatives that lost. What is built but **not** yet verified is listed honestly
+in [HANDOFF.md](./HANDOFF.md).
+
+### Added — `/kaizen:doctor`: the other half of "breaks nothing"
+
+Phase 6. The lock stops kaizen's own updates from destroying your edits; nothing
+stopped **Claude Code's** evolution from quietly invalidating your config.
+Decision record: [ADR-0010](./docs/decisions/0010-doctor-diagnoses-the-platform.md).
+
+- **`bin/kaizen-doctor`** (Python 3, JSON out) checks the platform and the
+  environment: deprecated settings keys, **misspelled hook event names** —
+  detected by edit distance, because a misspelled event never fires and never
+  errors — hooks and status lines pointing at missing or non-executable scripts,
+  unparseable settings, unsubstituted template markers still in `CLAUDE.md`, rules
+  with no `paths:`, agents with no frontmatter, a gitignored lock, missing baseline
+  snapshots, standards drift, and absent tools.
+- **`compat/claude-code.json`** — known settings keys, permissions keys, hook
+  events, deprecations and external tools. Versioned separately (`2026.08`) for the
+  same reason the standards catalog is: the platform outruns plugin releases.
+- **Three severities, and the third is load-bearing.** `problem` means kaizen can
+  prove it is broken; `warning` means probably wrong; `info` means kaizen does not
+  *recognise* it. The registry cannot list every valid key, so an unfamiliar one is
+  reported as unfamiliar — treating it as invalid would make doctor confidently
+  wrong the day the platform ships a new key.
+- **`/kaizen:doctor --fix`** applies only changes with one correct outcome:
+  `chmod +x`, the `.gitignore` negation, an agent name mismatch, and a `paths:`
+  block whose globs it **asks** for rather than guesses.
+- **`tests/suites/test_doctor.py` — 73 checks.** The most important is that a
+  healthy project reports nothing: the first false alarm is the last one anyone
+  reads.
+- A tenth verb needed a justification, so the bar is now written down: **a new
+  skill needs a distinct subject, not a distinct report section.** Doctor's subject
+  is the platform, and it is the only skill that assumes the config may be invalid.
+
+### Fixed — doctor called `node` a missing file
+
+Found by running it against a real project on the first try. A hook command's
+first token is not necessarily a path: `node .claude/hooks/reminder.mjs` is an
+entirely normal hook. Resolution now classifies the first token as a path (must
+exist and be executable) or a program name (must be on PATH), then checks the
+interpreter's script argument separately. Four checks pin the behaviour.
+
+The same run found something real, which is the point: four agents in that
+project have no frontmatter, so Claude Code never loaded them as agents.
+
+### Added — three working hooks, and a security baseline the harness asserts
+
+Phase 5. kaizen shipped **thirty** hook scripts, every one a no-op `exit 0`, with
+no `hooks.json` — so nothing kaizen did happened unless you typed it, and the
+stubs were shipped to users as if they were features. Decision record:
+[ADR-0009](./docs/decisions/0009-three-hooks-on-by-default.md).
+
+- **`PreToolUse` (Bash) — a safety net.** Blocks `rm -rf /` · `rm -rf ~` ·
+  `curl … | sh` · `chmod -R 777 /` · `git clean -x`, and warns without blocking on
+  force-push without `--force-with-lease`, `git reset --hard`, and `npm publish`.
+  The bar is explicit: a pattern belongs there only if **no legitimate command
+  could ever match it**. `rm -rf node_modules` and `rm -rf dist` run normally.
+  `KAIZEN_SAFETY=off` disables it.
+- **`SessionStart` — an oriented start.** Injects branch, dirty count, last
+  pre-merge verdict (flagged stale if source changed since), pending `/learn`
+  proposals, and standards drift between the lock and the installed catalog.
+  Silent when there is nothing to say.
+- **`Stop` — one nudge.** Suggests `/kaizen:finish` when source files changed and
+  no check has run since. Once per session, keyed by session id in the temp dir —
+  it writes nothing into the project. `KAIZEN_NUDGE=off` disables it.
+- **The other 26 stubs are deleted.** Intent for those events stays in
+  [TODO.md](./TODO.md), which is where unimplemented plans belong.
+- **Security baseline in the generated `settings.json`**: secrets unreadable
+  (`.env`, `secrets/`, `*.pem`, `id_rsa*`, `.ssh/`, `.aws/`), catastrophic deletes
+  and `sudo` denied, `git push` / `reset --hard` / `rebase` behind `ask`.
+- **`tests/suites/test_safety.py` — 121 checks**, of which the must-NOT-block
+  table is the important half. A false positive is the highest-severity bug this
+  hook can have, because a safety net that fires on real work gets switched off.
+
+### Fixed — the hooks kaizen writes into user projects were broken in two ways
+
+Found by running them, not by reading them.
+
+- **`Bash(rm -rf *)` was in the deny list.** It blocked `rm -rf node_modules`. An
+  over-broad deny rule gets the whole list deleted by the first person it annoys.
+  Replaced with anchored patterns.
+- **Four hooks used `jq` without checking for it, under `set -e`.** On a machine
+  without `jq` they errored on **every edit**. All six template hooks now read
+  their payload through a `payload_field` helper (jq → python3 → sed) and drop
+  `set -e`, which was wrong anyway: these scripts branch on commands that
+  legitimately return non-zero.
+- **The secret detector silently scanned nothing without `jq`.** Its content read
+  was a compound `jq` expression, so a missing `jq` yielded an empty string and
+  every write was approved. A security hook that silently does nothing is worse
+  than none.
+- **The private-key pattern never matched a real private key.** It required
+  `-----BEGIN RSA KEY-----`; every tool emits `-----BEGIN RSA PRIVATE KEY-----`.
+  All five real header forms now block.
+
+### Added — live behaviour evals for `/kaizen:upgrade` and `/kaizen:analyze`
+
+Both skills had been written and structurally checked but never executed. They
+have now run, and they pass.
+
+- **`tests/live/seed-project.sh`** builds the "generated by an older kaizen, then
+  edited by a human" state deterministically — config rendered from the catalog,
+  recorded with `kaizen-lock`, then a hand-written convention added, a generated
+  file deleted, and a foreign file planted. No live `/kaizen:init` is spent
+  setting the stage; the session is spent only on the skill under test.
+- **`assert_upgrade.py`** — the read-only contract for `plan` (hash the tree
+  before and after), and for `apply` the assertion the whole feature exists for:
+  the user's own rule survived the merge. Plus deleted files not resurrected,
+  foreign files untouched, the lock re-recorded at the new version, no conflict
+  markers leaked into the project.
+- **`assert_analyze.py`** — findings carry rule ids and sources, the three
+  populations stay apart (the user's own convention is never reported as a
+  catalog violation, an unadopted rule is never reported as a breach), excluded
+  paths are never cited, and the report says what it could not verify.
+- `run-live.sh` gained a `kind` column so each scenario is seeded and asserted
+  appropriately; five scenarios now.
+
+**Results:** `upgrade-plan` 4/4, `upgrade-apply` 9/9, `analyze-catalog` 13/13.
+The analyze run honoured both planted traps and volunteered why — it reported the
+`.d.ts` match as *"correctly excluded"* rather than silently dropping it.
+
+### Fixed — the lock now records the values placeholders resolved to
+
+Found by the first live `/kaizen:upgrade`. Re-rendering used fresh detection, so
+a project generated with `npm` that had since grown a `pnpm-lock.yaml` would have
+had every command line rewritten as a side effect of adopting a template change.
+The model caught it and pinned the values by its own judgement; that should be
+guaranteed by data, not inferred.
+
+- `kaizen-lock write --placeholder KEY=VALUE` (repeatable) records them; `status`
+  surfaces them; partial writes and `forget` merge rather than replace, the same
+  contract as files.
+- `/kaizen:init` records every placeholder it substituted; `/kaizen:upgrade`
+  re-renders from the recorded values and reports detection drift as **advice,
+  never as a change**.
+- A subtle bug fixed in the merge: `printf '%s'` emitted no trailing newline, so
+  the last existing entry and the first new one were concatenated into one line
+  that `awk` dropped for having three fields — silently losing **both** values.
+
+### Fixed — two gaps the live upgrade run exposed in `/kaizen:init`
+
+- **No `no_lint` conditional.** The generated `CLAUDE.md` advertised a `Lint:`
+  command the root manifest cannot run, in the first section Claude reads every
+  session. Added, with the same rationale as `no_format`.
+- **The `## Workflow` section had no source.** `init/SKILL.md` pointed at
+  `templates/_shared/workflow.md`, which does not exist — so one run invented the
+  prose and another refused to. Added `templates/_shared/CLAUDE.workflow.md` as
+  the verbatim source, and a harness check that every template path referenced by
+  a skill exists.
+
+### Changed — `/kaizen:analyze` verifies rules from the catalog (branch `next`)
+
+Phase 4. `--best-practices` stops matching conventions by prose and starts
+verifying them by rule id. Decision record:
+[ADR-0008](./docs/decisions/0008-analyze-reports-by-rule-id.md).
+
+- **The hardcoded keyword table is gone.** It matched a convention's text against
+  a private pattern list by case-insensitive substring, so rewording "No default
+  exports." to "Avoid default exports." silently disabled the check, with no
+  error anywhere. Checks now come from `kaizen-standards checks`, used verbatim,
+  and a harness check fails the build if any catalog pattern reappears inside
+  `analyze/SKILL.md`.
+- **Three populations, never mixed**: catalog rules kaizen wrote (verified by
+  id), conventions the user wrote themselves (not kaizen's to judge — one exact
+  text match is attempted and reported as such), and catalog rules that apply but
+  were never adopted (a gap, never a violation).
+- **Findings carry their provenance.** Each violation reports the rule's
+  severity, id, the first sentence of its rationale, and its source link — data
+  that was already in the object being read.
+- **New `### Standards status` section**: which rules are deprecated or unknown
+  to the catalog, and which were added since the `standards_version` in the lock,
+  via the new `kaizen-standards list --added-after <version>`.
+- **`--architecture` is workspace-aware**: globs `<package>/src/*/` per member
+  instead of a root `src/` that a monorepo does not have, which previously
+  reported every documented directory as missing.
+
+### Fixed — check globs anchored to the repository root
+
+Found by running a catalog check against a real monorepo. A directory glob
+without a `**/` prefix anchors to the repository root, so `scripts/**` never
+excluded `backend/src/scripts/`: TS-004 reported **36 violations in CLI scripts
+the rule was written to ignore**. Honouring the exclude correctly gives 0. All 38
+affected globs across the catalog now carry `**/`, and the harness fails any glob
+containing `/` that does not.
+
+Also recorded honestly rather than hidden: TS-003's pattern matches prose inside
+comments (ripgrep has no comment awareness). On the same real project its single
+hit was the comment `Crude heuristic: any CJK char`. The rule now carries a
+`note` about it, and `/kaizen:analyze` is required to print a check's note
+alongside its findings.
+
+### Fixed — workspace/monorepo detection (branch `next`)
+
+Found by running `/kaizen:init` against a real 132-file pnpm workspace.
+`kaizen-detect` read only the **root** `package.json`, where a monorepo keeps
+scripts and tooling but no framework or language dependency — so a TypeScript
+monorepo reported `stack: "javascript"`. After the standards catalog that stopped
+being cosmetic: detection filters which rules a project receives, and `TS-003`
+(`No any`) applies to `typescript` only, so a 132-file TypeScript codebase was
+silently getting no rule about `any`.
+
+Decision record: [ADR-0007](./docs/decisions/0007-monorepo-is-a-shape.md) — a
+monorepo is a **shape**, orthogonal to stack, not a new preset or stack token.
+
+- **`kaizen-detect` scans workspace members**, not just the root. New output
+  fields:
+  - `workspaces`: `{ type, packages, count }` where `type` is `pnpm` | `npm` |
+    `lerna` | `turbo` | `nx` | `cargo` | `go` | `none`, resolved from
+    `pnpm-workspace.yaml`, `workspaces` in `package.json`, or `lerna.json`, with
+    globs expanded to directories that actually hold a manifest.
+  - `project_name`: the manifest's own `name`, falling back to `basename(cwd)`.
+    The directory is whatever the user cloned into.
+  - A member declaring TypeScript now makes the whole project TypeScript.
+  - Frontend detection also recognises `@quasar/*` and `solid-js`; backend
+    detection recognises `@nestjs/core`.
+- **`/kaizen:init` uses the shape.** `architecture_layout` walks
+  `<package>/src/*/` for each workspace member instead of assuming a root `src/`
+  (which produced a false "No src/ directory detected"). `{{PROJECT_NAME}}` now
+  comes from `detect.project_name` rather than being re-derived.
+- **Two new conditionals**: `no_format` removes a `Format:` line the root
+  manifest cannot run — a dead command in the first section Claude reads every
+  session — and `workspace_scripts` annotates commands that only exist in a
+  member instead of inventing a root script.
+- **Two new fixtures** — `monorepo-pnpm` (mirrors the real project: root
+  manifest with no dependencies at all, plus a `frontend/plugins/*` glob to
+  expand) and `monorepo-npm` (workspace array inside `package.json`, needing
+  real JSON parsing). All six existing goldens were updated for the new schema,
+  which the harness demanded loudly — schema changes are now visibly expensive.
+- `kaizen-detect` calls `python3` for JSON reads that a line grep cannot do, and
+  falls back to grep; a missing `python3` degrades to today's behaviour (no
+  workspaces detected) rather than to a wrong answer.
+
+### Added — standards catalog with provenance (branch `next`)
+
+Phase 2 of [ROADMAP.md](./ROADMAP.md). Conventions move out of template prose
+and into versioned data, so practices can ship without a plugin release and
+every rule can be traced to its reasoning. Decision record:
+[ADR-0005](./docs/decisions/0005-standards-as-versioned-data.md).
+
+- **`plugins/kaizen/standards/`** — 31 rules across `universal`, `typescript`
+  and `python` domains, extracted from the v0.12 templates. Each carries a
+  statement, rationale, sources, date, severity, applicability
+  (stack × maturity), the surface it renders into, and its verification check.
+  Versioned independently as `standards_version: "2026.08"` (calendar
+  versioning — freshness is the value).
+- **`bin/kaizen-standards`** — `version` / `list` / `show` / `render` / `checks`.
+  Python 3 stdlib only ([ADR-0006](./docs/decisions/0006-python-for-structured-runtime-scripts.md)).
+  `render` emits deterministic markdown for a template surface; an unstable
+  order would make every `/kaizen:upgrade` show phantom changes.
+- **Templates became renderers.** The hand-written Conventions / Never do /
+  testing-rule lists are replaced by `<!-- KAIZEN_STANDARDS:<surface> -->`
+  markers that `/kaizen:init` fills from the catalog for the detected stack and
+  maturity. Rendered lines carry their rule id as an HTML comment.
+- **Rule refinement** — a stack-specific rule may `refine` a general one, which
+  is then suppressed for that project. Found by running the renderer: a
+  TypeScript project was getting both the vague and the precise version of the
+  same rule.
+- **`tests/suites/test_standards.py`** — 873 checks: schema, unique ids, ISO
+  dates, declared severities/surfaces/check types, `applies_to.stack` values
+  that `kaizen-detect` can actually emit, `refines`/`deprecated_by` targets that
+  exist, template markers and index surfaces agreeing in both directions, and
+  deterministic rendering.
+- **Check patterns are validated against ripgrep's dialect.** The Grep tool has
+  no lookaround or backreferences; a pattern using them compiles in Python and
+  silently never matches where it runs. One such pattern existed (TS-006) and
+  was fixed.
+- The harness now reports that **17 of 31 rules have no source** — a real debt,
+  deliberately surfaced as a warning on every run rather than hidden.
+- Docs: [`docs/architecture.md` §18](./docs/architecture.md), a README section,
+  and the decision records in [`docs/decisions/`](./docs/decisions/README.md).
+
+### Added — decision records and handoff notes
+
+- **[`docs/decisions/`](./docs/decisions/README.md)** — ADRs for every
+  structural choice made so far, including the ones that look arbitrary without
+  their reasoning (why the model never merges, why the lock is committed, why
+  `/kaizen:upgrade` was the one new verb allowed).
+- **[`HANDOFF.md`](./HANDOFF.md)** — current branch, what is done and verified,
+  **what is built but not yet verified**, and the working agreements. Updated at
+  the end of every session so a lost context can be rebuilt from the repo.
+
+### Added — configuration lock + `/kaizen:upgrade` (branch `next`)
+
+The first phase of the direction proposed in [ROADMAP.md](./ROADMAP.md): kaizen
+now records what it generates, so it can update a project later without
+overwriting what the user changed.
+
+- **`bin/kaizen-lock`** — deterministic bookkeeping. `write` hashes every
+  generated file and snapshots it under `.claude/kaizen/baseline/`; `status`
+  classifies each recorded file as `unchanged` / `modified` / `deleted`;
+  `merge` runs a real 3-way merge through `git merge-file` and reports the
+  conflict count without writing anything; `forget` untracks. All output is
+  JSON — the model reads it and decides, it never hashes or merges by hand.
+- **`.claude/kaizen/lock.json` + `baseline/`** — meant to be **committed**, like
+  `package-lock.json`. The `.gitignore` template now ignores
+  `.claude/kaizen/*` while negating both, and `kaizen-lock write` reports
+  `lock_is_gitignored` so the skills can repair an older `.gitignore`.
+- **`/kaizen:init` step 7** — records what it wrote. Additive: no existing
+  behaviour changes, and a missing `kaizen-lock` degrades to a warning in the
+  drift report rather than a failure.
+- **`/kaizen:upgrade`** — new skill. Plans before it writes, merges instead of
+  overwriting, never touches a file absent from the lock, never resurrects a
+  deleted one, and never resolves a conflict on the user's behalf. This is what
+  `--force` should have been.
+- **`tests/suites/test_lock.py`** — 37 behavioural checks over real temp repos,
+  including the two that matter: non-overlapping edits merge cleanly with the
+  user's own rule intact, and same-line edits are reported as conflicts rather
+  than silently merged away.
+- Docs: [`docs/architecture.md` §17](./docs/architecture.md) and a
+  "Configuration lock" section in the README.
+
 ### Added — validation harness
 
 kaizen now has a test suite. Until now the plugin had no automated verification

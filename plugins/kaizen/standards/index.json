@@ -1,0 +1,55 @@
+{
+  "_comment": "kaizen :: standards catalog index. The catalog is versioned INDEPENDENTLY of the plugin (see docs/decisions/0005-standards-as-versioned-data.md) so practices can ship without a plugin release. Calendar versioning, because freshness is the point.",
+
+  "standards_version": "2026.08",
+  "catalog_schema": 1,
+
+  "domains": [
+    { "file": "universal.json",  "applies_to_stack": ["*"],                          "id_prefix": "UNI" },
+    { "file": "typescript.json", "applies_to_stack": ["typescript", "javascript"],   "id_prefix": "TS" },
+    { "file": "python.json",     "applies_to_stack": ["python"],                     "id_prefix": "PY" }
+  ],
+
+  "_surfaces_comment": "Where a rule can be rendered. A template marks the spot with <!-- KAIZEN_STANDARDS:<surface> --> and /kaizen:init fills it with the rules that apply to the detected project. Adding a surface means adding it here AND placing the marker in a template — the harness checks both directions.",
+  "surfaces": {
+    "claude_md.conventions": {
+      "target_file": "CLAUDE.md",
+      "section": "## Conventions",
+      "description": "Rules Claude should follow while writing code in this project."
+    },
+    "claude_md.never": {
+      "target_file": "CLAUDE.md",
+      "section": "## Never do",
+      "description": "Hard prohibitions. Phrased as things not to do."
+    },
+    "rules_testing.conventions": {
+      "target_file": ".claude/rules/testing.md",
+      "section": "## Conventions",
+      "description": "Path-scoped rules loaded only when Claude edits test files."
+    },
+    "rules_testing.never": {
+      "target_file": ".claude/rules/testing.md",
+      "section": "## Never",
+      "description": "Prohibitions specific to test code."
+    }
+  },
+
+  "_severity_comment": "severity drives how a violation is reported by /kaizen:analyze — it does NOT mean a rule is more or less optional.",
+  "severity_levels": {
+    "security": "A violation can lead to a vulnerability. Always reported first.",
+    "safety": "A violation risks data loss, broken builds, or unrecoverable state.",
+    "convention": "A violation is inconsistency, not damage. Style and maintainability."
+  },
+
+  "_status_comment": "A rule is never deleted from the catalog — it is deprecated, so a project pinned to an older standards version can still explain where its rule came from.",
+  "status_values": ["active", "deprecated"],
+
+  "_refines_comment": "A stack-specific rule may declare `refines: <ID>` pointing at a general rule that says the same thing less precisely. When both would render into the same project, the general one is suppressed and the specific one wins — a project should be told 'throw Error subclasses', not that plus 'throw domain-specific error types'. The general rule still exists for stacks with no specialisation.",
+
+  "_check_comment": "How /kaizen:analyze verifies a rule. A rule with no check is reported under 'Unchecked (manual review)' — explicitly, never silently.",
+  "check_types": {
+    "grep": "Regex over include/exclude globs. A match is a violation.",
+    "sibling_file": "For each file matching include, a sibling matching pattern must exist.",
+    "none": "Not mechanically verifiable. Surfaced as unchecked."
+  }
+}

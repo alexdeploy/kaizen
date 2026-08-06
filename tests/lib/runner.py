@@ -25,6 +25,10 @@ SUITES = [
     "scripts",
     "hooks",
     "detect",
+    "lock",
+    "standards",
+    "safety",
+    "doctor",
 ]
 
 

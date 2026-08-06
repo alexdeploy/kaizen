@@ -3,11 +3,11 @@
 > 改善 (kaizen) = continuous improvement.
 > A Claude Code plugin that scaffolds a complete, adapted `.claude/` setup for any project — empty or existing — and (in future versions) evolves it as the project grows.
 
-## What it does today (v0.12.1)
+## What it does today (v0.13.0)
 
-`/kaizen:init --profile=advanced` now scaffolds a **project-level agent ecosystem** — 6 agents in `<project>/.claude/agents/` that Claude auto-invokes during general conversation (not just when invoking kaizen skills). Plus 2 new hooks (secret-detector + dependency-changed).
+**Shipped (v0.12.1):** 8 skills, 6 plugin-level agents, 7 project-level agents in the `advanced` profile, and a profile system for `/init`.
 
-**8 skills**, **6 plugin-level agents**, and a **profile system** for `/init`:
+**New in v0.13.0:** a configuration lock so updates cannot destroy your edits, a versioned standards catalog with provenance, workspace/monorepo detection, `/kaizen:upgrade`, `/kaizen:doctor`, three active hooks, and a validation harness of ~1.800 checks. See [ROADMAP.md](./ROADMAP.md) for why, [docs/decisions/](./docs/decisions/README.md) for each decision, and [HANDOFF.md](./HANDOFF.md) for what is verified and what is not.
 
 - `/kaizen:init` — bootstraps the project config. Profile flag: `--profile=<minimal|standard|advanced>` (default `standard`). The base scaffolding generates `CLAUDE.md`, settings, rules, code-reviewer agent, and hooks; standard+ profiles add a `workflow.md` rule documenting the kaizen-skill flow.
 - `/kaizen:learn` — proposes CLAUDE.md/rules updates from git activity. `--limit=<N>` / `--since=<ref>` for scope. Subcommands: `show`, `apply`, `discard`.
@@ -17,6 +17,58 @@
 - `/kaizen:docs` — surfaces user-facing documentation gaps from recent changes via the `docs-keeper` agent. Read-only.
 - `/kaizen:bump` — suggests semver bump (major/minor/patch) via the `versioner` agent. Detects changesets. Supports JS/TS, Python, Rust.
 - `/kaizen:finish` — **end-of-task orchestrator**. Chains deterministic checks + 4 parallel agents (security + commit + bump + docs) into a unified verdict and per-concern guidance.
+- `/kaizen:doctor` — is this setup actually working? Finds hooks pointing at missing scripts, misspelled hook events that silently never fire, deprecated settings keys, unsubstituted template markers, a gitignored lock, and missing tools. `--fix` applies only the unambiguous repairs.
+- `/kaizen:upgrade` — updates a project's generated config to the current plugin version **without overwriting your customisations**. Uses the lock file to tell untouched files from edited ones, and `git merge-file` for the rest. Plans before it writes. See [Configuration lock](#configuration-lock).
+
+## Standards catalog
+
+The rules kaizen writes into your `CLAUDE.md` are **versioned data with
+provenance**, not prose baked into a template:
+
+```bash
+kaizen-standards show TS-003
+```
+
+```json
+{
+  "id": "TS-003",
+  "statement": "**No `any`.** Use `unknown` and narrow.",
+  "rationale": "`any` disables checking for every expression it touches, and it spreads…",
+  "sources": [{ "label": "TypeScript Handbook — unknown", "url": "…" }],
+  "added": "2026-08-05",
+  "check": { "type": "grep", "pattern": ": any\\b|\\bas any\\b" }
+}
+```
+
+Every generated line carries its id (`<!-- TS-003 -->`), so any rule in your
+config can be traced back to its reasoning, its source and its date. The catalog
+is versioned independently of the plugin (`2026.08` — calendar versioning,
+because freshness is the point), which is what lets practices update without
+waiting for a plugin release.
+
+It also closes a real gap: a rule's *statement* and the *check* that verifies it
+are now one object with a stable id. Previously they lived in different files and
+were matched by substring, so rewording a convention silently disabled its check.
+
+## Configuration lock
+
+`/kaizen:init` records exactly what it wrote — a hash per file in
+`.claude/kaizen/lock.json`, plus a verbatim snapshot under
+`.claude/kaizen/baseline/`. Both are meant to be **committed**, like
+`package-lock.json`.
+
+That record is what turns updating from a gamble into an operation:
+
+| Your file | kaizen knows | On `/kaizen:upgrade` |
+|---|---|---|
+| Untouched since generation | hash matches the lock | Replaced silently with the new version |
+| You edited it | hash differs | **3-way merged** — your edits and the new template both survive; genuine collisions are shown, never auto-resolved |
+| You deleted it | recorded but absent | Left deleted |
+| kaizen never wrote it | not in the lock | Never touched |
+
+Before the lock, the only update path was `--force`, which overwrites. The lock
+is what makes "keeps improving without breaking anything" a mechanism rather
+than a promise.
 
 ## Project agent ecosystem (v0.12+, `--profile=advanced`)
 
@@ -50,6 +102,24 @@ All marked with `kaizen-managed: true` so `--force` re-init can update them. Cha
 
 (All distinct from the project-level `.claude/agents/code-reviewer.md` that `/kaizen:init` generates — that one is user-customizable for manual review.)
 
+## Known limitations
+
+Published deliberately. The validation harness reports each of these on every
+run, so they cannot quietly rot:
+
+| Limitation | Effect |
+|---|---|
+| Six stacks (`go`, `rust`, `java`, `ruby`, `php`, `elixir`) are detected but fall back to the `generic` preset | detection promises more adaptation than the templates deliver |
+| 17 of 31 catalog rules have no source | they are kaizen's opinions rather than sourced practice, and the harness says so every run |
+| `detect_maturity` counts only source-code extensions | a repo of prose and shell scripts reports `maturity: "empty"` — kaizen's own repo included |
+| Grep-based rule checks have no comment awareness | a rule can match its own name inside a comment; affected rules carry a note and `/kaizen:analyze` prints it |
+| `PreToolUse` is a safety net, not a sandbox | it reads commands as text, so a sufficiently indirect destructive command gets through |
+| The compat registry cannot be exhaustive | an unfamiliar settings key is reported as *unrecognised*, never as invalid |
+| One root `CLAUDE.md` in a monorepo | workspaces are detected and used for layout, but per-package rule scoping is not built yet |
+
+What is built but **not yet verified in a live run** is listed in
+[HANDOFF.md](./HANDOFF.md).
+
 ## What's coming next
 
 Tracked in [BACKLOG.md](./BACKLOG.md). Highlights:
@@ -69,8 +139,16 @@ kaizen/
     └── kaizen/                   ← the plugin itself
         ├── .claude-plugin/
         │   └── plugin.json
-        ├── bin/
-        │   └── kaizen-detect     ← auto-added to PATH when plugin is enabled
+        ├── bin/                  ← auto-added to PATH when plugin is enabled
+        │   ├── kaizen-detect     ← project fingerprint (bash)
+        │   ├── kaizen-lock       ← what was generated; hashing + 3-way merge (bash)
+        │   ├── kaizen-standards  ← query/render the rule catalog (python3)
+        │   └── kaizen-doctor     ← config + platform health (python3)
+        ├── standards/            ← the versioned rule catalog
+        ├── compat/               ← what kaizen knows about Claude Code
+        ├── hooks/
+        │   ├── hooks.json        ← the three active hooks
+        │   └── scripts/          ← their implementations
         ├── agents/
         │   ├── preflight-security.md         ← /preflight + /finish (security audit)
         │   ├── commit-suggester.md           ← /preflight + /finish (commit msg)

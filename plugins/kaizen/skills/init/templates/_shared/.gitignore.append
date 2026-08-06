@@ -2,3 +2,12 @@
 # kaizen :: Claude Code local config (NO commit)
 .claude/settings.local.json
 .claude/agent-memory-local/
+
+# kaizen :: transient artifacts — reports, plans, pending proposals
+.claude/kaizen/*
+
+# ...but the configuration lock IS part of the project's record. Commit it, the
+# same way you commit package-lock.json: it is what lets /kaizen:upgrade update
+# your config without overwriting your customisations, for everyone on the team.
+!.claude/kaizen/lock.json
+!.claude/kaizen/baseline/

@@ -146,8 +146,18 @@ def walk_files(root, suffixes=None):
 
 
 def shell_scripts():
-    """Every shell script shipped by the plugin, including template hooks."""
-    found = [DETECT_BIN]
+    """Every shell script shipped by the plugin.
+
+    Everything in bin/ (which has no extension by convention, since Claude Code
+    puts the directory on PATH) plus every .sh under the plugin, including the
+    hooks that templates copy into user projects.
+    """
+    bin_dir = os.path.join(PLUGIN_ROOT, "bin")
+    found = sorted(
+        os.path.join(bin_dir, name)
+        for name in os.listdir(bin_dir)
+        if os.path.isfile(os.path.join(bin_dir, name))
+    )
     found += sorted(walk_files(PLUGIN_ROOT, [".sh"]))
     return found
 
@@ -197,3 +207,24 @@ def _section(text, heading):
 def config(name):
     """Load a JSON config file from tests/config/."""
     return read_json(os.path.join(CONFIG_DIR, name))
+
+
+def detect_stack_tokens():
+    """Every stack token kaizen-detect can emit.
+
+    Single source of truth for the suites that check stack coverage (templates,
+    standards). Tokens reach the output two ways: appended to the `stacks` array
+    for whole-project signals, and echoed by `scan_manifest` for per-manifest
+    ones — a workspace scans several manifests, so those cannot use the array.
+    """
+    text = read(DETECT_BIN)
+    tokens = set(re.findall(r'stacks\+=\("([a-z-]+)"\)', text))
+
+    # Only echoes inside scan_manifest are stack tokens; the other helpers echo
+    # package managers, maturity levels and CI providers.
+    match = re.search(r"^scan_manifest\(\).*?^}", text, re.MULTILINE | re.DOTALL)
+    if match:
+        tokens |= set(re.findall(r'echo "([a-z][a-z-]*)"', match.group(0)))
+
+    tokens.add("generic")
+    return tokens

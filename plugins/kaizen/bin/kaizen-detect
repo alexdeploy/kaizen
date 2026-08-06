@@ -12,22 +12,131 @@ exists() { [ -e "$1" ]; }
 count_files() { find . -maxdepth 5 -type f -name "$1" -not -path './node_modules/*' -not -path './.git/*' -not -path './dist/*' -not -path './build/*' -not -path './.venv/*' -not -path './venv/*' 2>/dev/null | wc -l | tr -d ' '; }
 has_dir() { [ -d "$1" ] && echo true || echo false; }
 
+# Read a value out of a JSON manifest. Uses python3 when present because a
+# `workspaces` array can span lines and nest; falls back to grep, which handles
+# the common single-line `"name": "x"` case. A failed read yields empty, which
+# always degrades to today's behaviour rather than to a wrong answer.
+json_get() { # json_get <file> <name|workspaces>
+  local file="$1" what="$2"
+  [ -f "$file" ] || return 0
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "$file" "$what" <<'PY' 2>/dev/null || true
+import json, sys
+try:
+    with open(sys.argv[1], encoding="utf-8") as fh:
+        data = json.load(fh)
+except Exception:
+    sys.exit(0)
+what = sys.argv[2]
+if what == "name":
+    name = data.get("name")
+    if isinstance(name, str):
+        print(name)
+elif what == "workspaces":
+    ws = data.get("workspaces")
+    if isinstance(ws, dict):
+        ws = ws.get("packages")
+    if isinstance(ws, list):
+        for entry in ws:
+            if isinstance(entry, str):
+                print(entry)
+PY
+  elif [ "$what" = "name" ]; then
+    grep -m1 -E '"name"[[:space:]]*:' "$file" 2>/dev/null \
+      | sed -E 's/.*"name"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/' || true
+  fi
+}
+
+# Workspace (monorepo) detection.
+# Sets WS_TYPE and the WS_PACKAGES array. A monorepo is a *shape*, orthogonal to
+# stack: it changes WHERE configuration goes, not what it says.
+WS_TYPE="none"
+WS_PACKAGES=()
+
+detect_workspaces() {
+  local patterns=()
+
+  if exists pnpm-workspace.yaml; then
+    WS_TYPE="pnpm"
+    # Minimal YAML: the `packages:` list of `- 'glob'` entries. Nested or
+    # flow-style YAML is out of scope and yields no packages, never a wrong one.
+    while IFS= read -r line; do
+      patterns+=("$line")
+    done < <(sed -n '/^packages:/,/^[^ -]/p' pnpm-workspace.yaml 2>/dev/null \
+      | sed -n "s/^[[:space:]]*-[[:space:]]*['\"]\{0,1\}\([^'\"]*\)['\"]\{0,1\}[[:space:]]*$/\1/p")
+  fi
+
+  if [ ${#patterns[@]} -eq 0 ] && exists package.json; then
+    while IFS= read -r line; do
+      [ -n "$line" ] && patterns+=("$line")
+    done < <(json_get package.json workspaces)
+    [ ${#patterns[@]} -gt 0 ] && WS_TYPE="npm"
+  fi
+
+  if [ ${#patterns[@]} -eq 0 ] && exists lerna.json; then
+    while IFS= read -r line; do
+      [ -n "$line" ] && patterns+=("$line")
+    done < <(json_get lerna.json workspaces)
+    [ ${#patterns[@]} -gt 0 ] && WS_TYPE="lerna"
+  fi
+
+  # Task runners imply a monorepo even when the package list lives elsewhere.
+  if [ "$WS_TYPE" = "none" ]; then
+    exists turbo.json && WS_TYPE="turbo"
+    exists nx.json && WS_TYPE="nx"
+    exists go.work && WS_TYPE="go"
+    exists Cargo.toml && grep -q '^\[workspace\]' Cargo.toml 2>/dev/null && WS_TYPE="cargo"
+  fi
+
+  # Expand the globs into directories that actually hold a manifest.
+  local pattern dir
+  for pattern in ${patterns+"${patterns[@]}"}; do
+    [ -n "$pattern" ] || continue
+    case "$pattern" in !*) continue ;; esac   # negations: not supported, skipped
+    for dir in $pattern; do
+      [ -d "$dir" ] || continue
+      case "$dir" in node_modules/*|*/node_modules/*) continue ;; esac
+      [ -f "$dir/package.json" ] && WS_PACKAGES+=("${dir%/}")
+    done
+  done
+}
+
+# Scan one package.json for stack signals. Used for the root and, in a
+# workspace, for every member — the root manifest of a monorepo is usually just
+# scripts and tooling, so root-only scanning reports the wrong stack.
+scan_manifest() { # scan_manifest <package.json> -> tokens on stdout
+  local file="$1"
+  [ -f "$file" ] || return 0
+  grep -qE '"(react|next|vue|svelte|astro|remix|@quasar/[a-z-]+|solid-js)"' "$file" 2>/dev/null && echo "frontend"
+  grep -qE '"(express|fastify|hono|nestjs|@nestjs/core|koa)"' "$file" 2>/dev/null && echo "backend-node"
+  if grep -qE '"typescript"' "$file" 2>/dev/null; then echo "typescript"; else echo "javascript"; fi
+}
+
 # Stack detection
 detect_stack() {
   local stacks=()
-  exists package.json && {
-    if grep -qE '"(react|next|vue|svelte|astro|remix)"' package.json 2>/dev/null; then
-      stacks+=("frontend")
+  if exists package.json; then
+    while IFS= read -r token; do
+      [ -n "$token" ] && stacks+=("$token")
+    done < <(scan_manifest package.json)
+
+    local pkg
+    for pkg in ${WS_PACKAGES+"${WS_PACKAGES[@]}"}; do
+      while IFS= read -r token; do
+        [ -n "$token" ] && stacks+=("$token")
+      done < <(scan_manifest "$pkg/package.json")
+    done
+
+    # A workspace member with TypeScript makes the project TypeScript, even
+    # when the root manifest carries no dependencies at all.
+    if printf '%s\n' ${stacks+"${stacks[@]}"} | grep -qx "typescript"; then
+      local kept=()
+      for token in ${stacks+"${stacks[@]}"}; do
+        [ "$token" = "javascript" ] || kept+=("$token")
+      done
+      stacks=(${kept+"${kept[@]}"})
     fi
-    if grep -qE '"(express|fastify|hono|nestjs|koa)"' package.json 2>/dev/null; then
-      stacks+=("backend-node")
-    fi
-    if grep -qE '"typescript"' package.json 2>/dev/null; then
-      stacks+=("typescript")
-    else
-      stacks+=("javascript")
-    fi
-  }
+  fi
   exists pyproject.toml || exists requirements.txt || exists setup.py && stacks+=("python")
   exists go.mod && stacks+=("go")
   exists Cargo.toml && stacks+=("rust")
@@ -122,20 +231,56 @@ detect_ci() {
   echo "none"
 }
 
+# Project name: the manifest's own name beats the directory name, which is
+# whatever the user happened to clone into.
+detect_project_name() {
+  local name=""
+  exists package.json && name="$(json_get package.json name)"
+  if [ -z "$name" ] && exists pyproject.toml; then
+    name="$(sed -n 's/^name[[:space:]]*=[[:space:]]*["'"'"']\([^"'"'"']*\)["'"'"'].*/\1/p' pyproject.toml | head -1)"
+  fi
+  if [ -z "$name" ] && exists Cargo.toml; then
+    name="$(sed -n 's/^name[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' Cargo.toml | head -1)"
+  fi
+  [ -n "$name" ] || name="$(basename "$PWD")"
+  echo "$name"
+}
+
 # Compose JSON output
+detect_workspaces          # must run before detect_stack: it feeds the scan
 STACK=$(detect_stack)
 PM=$(detect_pm)
+PROJECT_NAME=$(detect_project_name)
 MATURITY=$(detect_maturity)
 IFS='|' read -r GIT_EXISTS GIT_COMMITS GIT_BRANCH < <(git_state)
 CLAUDE_CFG=$(detect_claude_config)
 TEST_COUNT=$(detect_tests)
 CI=$(detect_ci)
 
+# Workspace packages as a JSON array, in a stable order.
+ws_packages_json() {
+  local first=1 pkg
+  printf '['
+  for pkg in $(printf '%s\n' ${WS_PACKAGES+"${WS_PACKAGES[@]}"} | LC_ALL=C sort); do
+    [ -n "$pkg" ] || continue
+    [ $first -eq 1 ] || printf ', '
+    first=0
+    printf '"%s"' "$pkg"
+  done
+  printf ']'
+}
+
 cat <<JSON
 {
+  "project_name": "${PROJECT_NAME}",
   "stack": "${STACK}",
   "package_manager": "${PM}",
   "maturity": "${MATURITY}",
+  "workspaces": {
+    "type": "${WS_TYPE}",
+    "packages": $(ws_packages_json),
+    "count": ${#WS_PACKAGES[@]}
+  },
   "git": {
     "is_repo": ${GIT_EXISTS},
     "commits": ${GIT_COMMITS},

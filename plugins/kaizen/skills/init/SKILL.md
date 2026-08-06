@@ -2,7 +2,7 @@
 description: Bootstrap the Claude Code configuration for this project. Detects stack and maturity, then scaffolds a tailored CLAUDE.md, settings.json, rules, agents, and hooks. Works on empty AND existing projects. Supports profiles (minimal/standard/advanced) controlling how much workflow scaffolding to include.
 disable-model-invocation: true
 argument-hint: "[--preset <name>] [--profile=<minimal|standard|advanced>] [--force] [--minimal]"
-allowed-tools: Read, Write, Edit, Glob, Grep, Bash(kaizen-detect), Bash(kaizen-detect *), Bash(git *), Bash(chmod *), Bash(test *), Bash(ls *), Bash(find *), Bash(mkdir *)
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash(kaizen-detect), Bash(kaizen-detect *), Bash(kaizen-lock *), Bash(kaizen-standards *), Bash(git *), Bash(chmod *), Bash(test *), Bash(ls *), Bash(find *), Bash(mkdir *)
 ---
 
 # /kaizen:init
@@ -33,7 +33,7 @@ The `--profile=<level>` flag controls how much of kaizen's **advanced workflow**
 | Profile | What it adds beyond base bootstrap |
 |---|---|
 | `minimal` | **Nothing extra**. Identical to v0.6 output — just CLAUDE.md, settings, 1 rule, code-reviewer agent, 2 hooks. Use for throwaway projects or when you don't want kaizen surfacing workflow recommendations. |
-| `standard` (default) | Adds `.claude/rules/workflow.md` documenting the kaizen-enabled workflow (when to run `/kaizen:learn`, `/analyze`, `/preflight`, `/docs`, `/bump`, `/finish`). Adds a "Workflow" section to CLAUDE.md mentioning these skills. **No automation forced** — the user invokes skills manually. |
+| `standard` (default) | Adds `.claude/rules/workflow.md` documenting the kaizen-enabled workflow. Appends the **verbatim contents of `templates/_shared/CLAUDE.workflow.md`** to `CLAUDE.md` — do NOT compose that prose yourself; two runs would produce different files and an upgrade could not tell a template change from an invention. **No automation forced** — the user invokes skills manually. |
 | `advanced` | Standard + a more detailed `.claude/rules/workflow-advanced.md` with the **end-of-task ritual** (recommend `/kaizen:finish` before every commit). Adds a stack-specific **Versioning** section to CLAUDE.md (changesets if monorepo, direct manifest bump otherwise). |
 
 The plugin's new skills (`/kaizen:docs`, `/kaizen:bump`, `/kaizen:finish`) and agents (`docs-keeper`, `versioner`) are **always available** when the kaizen plugin is installed, regardless of profile. The profile only controls whether the user's `CLAUDE.md` and rules **document** them as part of the recommended workflow.
@@ -48,7 +48,7 @@ These are the ONLY placeholders you substitute. Be exact — wrong values are bu
 
 | Placeholder | Source | Example |
 |---|---|---|
-| `{{PROJECT_NAME}}` | `basename(cwd)` | `quasar-project` |
+| `{{PROJECT_NAME}}` | `detect.project_name` — the manifest's own `name`, falling back to `basename(cwd)`. Never re-derive it: the directory is whatever the user cloned into. | `slabiq` |
 | `{{STACK_RAW}}` | `detect.stack` field, raw CSV | `typescript,frontend` |
 | `{{STACK_FRIENDLY}}` | Human-readable name YOU derive from `STACK_RAW` + `package.json`. **Conservative**: use detected framework names; do not invent. | `TypeScript / Vue 3 / Quasar` |
 | `{{PACKAGE_MANAGER}}` | `detect.package_manager` | `npm` |
@@ -61,6 +61,54 @@ These are the ONLY placeholders you substitute. Be exact — wrong values are bu
 - Never invent values to fill placeholders.
 
 ---
+
+## Standards markers (v0.14+) — `<!-- KAIZEN_STANDARDS:<surface> -->`
+
+**These are not enrichment directives and you do not write their content.** The
+rules a project gets are data, not prose you compose: they live in the versioned
+catalog at `<plugin>/standards/`, each with a rationale, a source and a date
+(see `docs/decisions/0005-standards-as-versioned-data.md`).
+
+For each `<!-- KAIZEN_STANDARDS:<surface> -->` marker in a template, replace the
+marker line with the **verbatim stdout** of:
+
+```
+kaizen-standards render --surface <surface> --stack <detect.stack> --maturity <detect.maturity>
+```
+
+Pass `detect.stack` exactly as detected (the raw CSV, e.g. `frontend,typescript`)
+and `detect.maturity` unchanged.
+
+Hard rules for this marker type:
+
+- **Paste the output verbatim.** Do not reword a rule, reorder lines, merge two
+  rules, drop one you disagree with, or add one that is not in the output. The
+  ordering is deterministic on purpose.
+- **Keep the `<!-- ID -->` comments.** They are what lets a line in the user's
+  `CLAUDE.md` be traced back to the rule that produced it, and what
+  `/kaizen:analyze` uses to check the right thing.
+- **Never invent a rule.** If the project needs something the catalog lacks,
+  that goes in the Suggestions section of the report, not into the file.
+- **Exit code 1 means no rule applies** (an unknown stack, or a project too
+  young for a rule's `maturity`). Then, and only then, write the fallback line
+  for that surface:
+  - `claude_md.conventions` → `- <Add the rules Claude must follow always>`
+  - `claude_md.never` → `- <Hard rules. If something must hold ALWAYS, consider a hook in `.claude/settings.json` instead>`
+  - `rules_testing.*` → `- <Add project-specific testing rules here>`
+- **If `kaizen-standards` is unavailable** (command not found, or a broken
+  catalog), do not improvise the rules from memory. Read the catalog JSON files
+  directly with the Read tool and apply the same filters by hand, or — if the
+  catalog is unreadable — write the fallback line and record it in the drift
+  report as `⚠ standards unavailable; section left as placeholder`.
+
+Record each filled surface in the drift report:
+
+```
+CLAUDE.md:
+  ✎ Standards [claude_md.conventions]: 5 rules from standards@<version> (TS-001, TS-002, …)
+```
+
+Get `<version>` from `kaizen-standards version`.
 
 ## Enrichment directive registry
 
@@ -172,11 +220,30 @@ Examples:
 
 **Location**: inside `## Architecture (brief)` section of `CLAUDE.md`.
 
-**Action**: Use the Glob tool with pattern `src/*/`. For each direct child directory of `src/`, append a bullet:
+**Action**: depends on whether this is a workspace.
+
+**Single-package project** (`detect.workspaces.type == "none"`) — Glob `src/*/`.
+For each direct child directory of `src/`, append a bullet:
 
 ```
 - `src/<dir>/` — <inferred purpose>
 ```
+
+**Workspace** (`detect.workspaces.type != "none"`) — a monorepo usually has no
+root `src/`, and globbing for one would write "No src/ directory detected",
+which is false. Instead, for **each** package in `detect.workspaces.packages`,
+glob `<package>/src/*/` and emit its children under a package heading:
+
+```
+- `<package>/` — <package name from its manifest>
+  - `<package>/src/<dir>/` — <inferred purpose>
+```
+
+Cap the total at 20 bullets across all packages; if there are more, list the
+largest packages first and end with `- ... (and N more)`. If a package has no
+`src/`, glob its direct children instead and mark it `(no src/ — flat layout)`.
+
+The purpose lookup table below applies the same way in both modes.
 
 Inferred purpose comes from the directory name. Use this table; if the name isn't here, write `(purpose: TBD)`.
 
@@ -230,6 +297,9 @@ These are the ONLY content removals you may perform beyond substitution and enri
 | `no_build` | No `build` script in `package.json` | In CLAUDE.md `## Commands`, remove the `Build: ...` line. |
 | `no_package_manager` | `PACKAGE_MANAGER == "none"` | In CLAUDE.md `## Commands`, replace all `{{PACKAGE_MANAGER}}`-prefixed lines with: `<!-- No package manager detected. Add commands here once one is chosen. -->` |
 | `dev_script_present` | Project has `dev` script but template has no `Dev:` line | In CLAUDE.md `## Commands`, insert `Dev: {{PACKAGE_MANAGER}} run dev` after `Install`. |
+| `no_lint` | No `lint` script in the **root** manifest | In CLAUDE.md `## Commands`, remove the `Lint: ...` line. Same reasoning as `no_format`. |
+| `no_format` | No `format` script in the **root** manifest | In CLAUDE.md `## Commands`, remove the `Format: ...` line. A command that does not exist is worse than a missing one: it is in the first section Claude reads every session. |
+| `workspace_scripts` | `detect.workspaces.type != "none"` AND a command's script is missing from the root manifest but present in a member | Keep the line, and append ` (run per package: <pm> --filter <pkg> <script>)`. Report which member you took it from. Do **not** invent a root script that does not exist. |
 
 **No other removals or insertions are allowed.** If you want to add framework-specific content (e.g., Vue Test Utils to testing.md), report it as a **suggestion** (see the Suggestions section below) — do not auto-apply. Framework overlays are planned for v0.3.
 
@@ -339,7 +409,9 @@ If `--profile=standard` (default) or `--profile=advanced`, **additionally** gene
 .claude/rules/workflow.md   # documents the kaizen-skill workflow
 ```
 
-Append to `CLAUDE.md` a new `## Workflow` section that lists the kaizen skills (`/kaizen:learn`, `/analyze`, `/preflight`, `/docs`, `/bump`, `/finish`) and when to run each. Use the content from `templates/_shared/workflow.md` as the source of truth — substitute placeholders the same as other files.
+Append to `CLAUDE.md` the **verbatim contents** of `templates/_shared/CLAUDE.workflow.md`, substituting placeholders the same as any other file. Do not compose this section yourself and do not reword it: two runs would produce different prose, and `/kaizen:upgrade` could then not tell a template change from an invention.
+
+(The path-scoped rule file is a different artifact: `templates/_shared/.claude/rules/workflow.md`, written to `.claude/rules/workflow.md`.)
 
 If `--profile=advanced`, **additionally** generate:
 
@@ -402,11 +474,56 @@ If `--minimal` file-count flag is passed: only `CLAUDE.md` + `.claude/settings.j
 
 After writing hook scripts, run `chmod +x` on each via Bash tool.
 
-### 7. Archeology (optional, mature projects only)
+### 7. Record what you wrote (lock file) — v0.13+
+
+**Mandatory. Do this after every file is written and chmod'ed, before the report.**
+
+This is what makes `/kaizen:upgrade` possible later: without a record of exactly
+what kaizen produced, a future update cannot tell a file the user customised
+from one they never touched, and the only options are "overwrite your work" or
+"never update". Recording is cheap; not recording is unrecoverable.
+
+Run via **Bash tool**, passing every file you created or overwrote in this run:
+
+```
+kaizen-lock write --plugin-version <version from plugin.json> --standards-version <from kaizen-standards version> --profile <profile> --preset <preset> --placeholder PROJECT_NAME=<value> --placeholder PACKAGE_MANAGER=<value> --placeholder TEST_RUNNER=<value> --placeholder STACK_FRIENDLY=<value> CLAUDE.md .claude/settings.json .claude/rules/<...> .claude/agents/<...> .claude/hooks/<...>
+```
+
+Pass `--placeholder KEY=VALUE` for **every placeholder you substituted**, with the
+value you actually used. This is not bookkeeping for its own sake: `/kaizen:upgrade`
+re-renders from these recorded values rather than from fresh detection, so a
+project that later grows a `pnpm-lock.yaml` does not silently have every command
+line rewritten by an upgrade. Also pass `--standards-version` so staleness can be
+computed later.
+
+Rules:
+
+- **Only pass files you actually wrote.** Never pass a file you skipped because
+  it already existed — kaizen did not produce it and must not claim it.
+- Do **not** pass `.gitignore` (kaizen appends to it, never owns it).
+- The script writes `.claude/kaizen/lock.json` and snapshots each file under
+  `.claude/kaizen/baseline/`. You do not write either by hand.
+- If the script reports `"lock_is_gitignored": true`, the project's `.gitignore`
+  excludes the whole `.claude/kaizen/` directory. Fix it with the Edit tool:
+  replace the line `.claude/kaizen/` with `.claude/kaizen/*` followed by
+  `!.claude/kaizen/lock.json` and `!.claude/kaizen/baseline/`. The lock and its
+  baselines are meant to be committed; the reports and plans are not.
+- If `kaizen-lock` is not found, do not abort the run — report it in the drift
+  report as `⚠ lock not recorded (kaizen-lock unavailable); /kaizen:upgrade will
+  fall back to diff-only mode` and continue.
+
+Add one line to the drift report for it:
+
+```
+.claude/kaizen/lock.json:
+  ✎ Recorded <N> generated files for /kaizen:upgrade
+```
+
+### 8. Archeology (optional, mature projects only)
 
 Same as before: spawn Explore subagent, append findings to CLAUDE.md.
 
-### 8. Report
+### 9. Report
 
 Print the summary in this exact format:
 

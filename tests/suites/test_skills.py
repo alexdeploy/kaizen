@@ -97,6 +97,20 @@ def run(r):
             "%s is documented in README.md" % label,
         )
 
+        # A skill that writes into a project must record what it wrote, or the
+        # next upgrade cannot tell its output from the user's edits.
+        if name in ("init", "upgrade"):
+            r.check(
+                "kaizen-lock write" in body,
+                "%s records what it wrote via kaizen-lock" % label,
+            )
+            r.check(
+                "--placeholder" in body,
+                "%s records the placeholder values it resolved" % label,
+                "upgrade re-renders from these; without them it re-detects and "
+                "silently rewrites values the user never asked to change",
+            )
+
 
 def _skills_documented_in_readme():
     readme = P.read(os.path.join(P.REPO_ROOT, "README.md"))

@@ -13,6 +13,7 @@ Both are invisible in review and only surface in a user's project.
 
 import json
 import os
+import re
 
 import kzparse as P
 
@@ -94,9 +95,19 @@ def run(r):
         except ValueError as exc:
             r.fail("%s is not valid JSON" % P.rel(path), exc)
 
+    # --- prose the skill appends must come from a file --------------------
+    # A run that composes this section itself produces different output every
+    # time, so /kaizen:upgrade cannot tell a template change from an invention.
+    init_skill = P.read(os.path.join(P.SKILLS_DIR, "init", "SKILL.md"))
+    for referenced in re.findall(r"templates/(_shared/[A-Za-z0-9_.\-]+\.md)", init_skill):
+        r.check(
+            os.path.isfile(os.path.join(P.TEMPLATES_DIR, referenced)),
+            "init/SKILL.md references a template that exists (%s)" % referenced,
+        )
+
     # --- every stack the detector emits maps to a real preset -------------
     mapping = P.config("stack-presets.json")["stack_to_preset"]
-    emitted = _stacks_kaizen_detect_can_emit()
+    emitted = P.detect_stack_tokens()
 
     for stack in sorted(emitted):
         if not r.check(
@@ -122,11 +133,3 @@ def run(r):
         )
 
 
-def _stacks_kaizen_detect_can_emit():
-    """Every literal pushed onto the stacks array in kaizen-detect."""
-    import re
-
-    text = P.read(P.DETECT_BIN)
-    stacks = set(re.findall(r'stacks\+=\("([a-z-]+)"\)', text))
-    stacks.add("generic")  # the explicit empty-case fallback
-    return stacks

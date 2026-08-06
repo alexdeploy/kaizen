@@ -6,92 +6,41 @@ For deferred polish items with full design context (`/learn --include-session`, 
 
 ---
 
-## Hooks Implementation
+## Hooks
 
-29 hook stubs live at [`plugins/kaizen/hooks/scripts/`](./plugins/kaizen/hooks/scripts/). Each one is a no-op `exit 0` shell script ready to be implemented. None are wired in `hooks.json` yet — kaizen ships zero active plugin-level hooks in v0.10.
+**Three hooks are implemented, wired and active** (phase 5,
+[ADR-0009](./docs/decisions/0009-three-hooks-on-by-default.md)):
 
-For each event below: the **intended kaizen behavior** + **priority** for implementing.
-
-### Session-level
-
-| Hook | Intended kaizen behavior | Priority |
+| Hook | Behaviour | Off switch |
 |---|---|---|
-| **SessionStart** | Inject `git status --porcelain` + branch name + last `/kaizen:finish` verdict (if `.claude/kaizen/finish-report.md` exists) so Claude starts the session with awareness of repo state and any pending issues. | **high** |
-| **SessionEnd** | Append a one-line entry to `.claude/kaizen/session.log` (timestamp, files modified count, did /finish run, verdict). Useful for retrospectives. Optionally suggest `/kaizen:learn` if many uncommitted files. | medium |
-| **Setup** | When `claude --init` runs in a fresh project, auto-suggest `/kaizen:init --profile=standard` if no `CLAUDE.md` exists. One-shot helper. | medium |
+| `PreToolUse` (Bash) | blocks a tiny catastrophic set, warns on a risky set | `KAIZEN_SAFETY=off` |
+| `SessionStart` | injects branch, dirty count, last verdict, pending proposals, standards drift | — |
+| `Stop` | suggests `/kaizen:finish` once per session when source changed | `KAIZEN_NUDGE=off` |
 
-### Turn-level
+The other **26 no-op stubs were deleted**. Shipping stubs to users as if they
+were features costs more trust than documenting the intent ever bought.
 
-| Hook | Intended kaizen behavior | Priority |
+### Events with no implementation, and what they would do
+
+Kept here as intent — **not as shipped code**. Anything promoted from this list
+needs a real implementation, an entry in `hooks.json`, its name in `ACTIVE_HOOKS`
+in `tests/suites/test_hooks.py`, and behavioural checks in `tests/suites/test_safety.py`.
+
+| Event | Intended behaviour | Priority |
 |---|---|---|
-| **UserPromptSubmit** | Pre-process: detect if the user said something like "commit" or "open PR" and surface a reminder to run `/kaizen:finish` first if not already done in this turn. Never block (no exit 2) — just informational. | low |
-| **UserPromptExpansion** | Audit which kaizen skills get invoked in a session — append to a per-session log for usage analytics. Optional, off by default in v1.0. | low |
-| **Stop** | The big one. After Claude finishes a turn, check: did files change? Has `/kaizen:finish` been run since? If no AND files changed → surface a one-line suggestion: `"Tip: run /kaizen:finish before committing."` Implement with debouncing (skip if just ran). | **high** |
-| **StopFailure** | Capture the API error to `.claude/kaizen/failures.log` for debugging. Don't surface to user (Claude already does). | low |
-| **PostToolBatch** | If a batch of Edits touched >5 files, run `format-on-save.sh` on all of them at once instead of per-edit (more efficient than `PostToolUse` per file). | medium |
-
-### Tool-execution
-
-| Hook | Intended kaizen behavior | Priority |
-|---|---|---|
-| **PreToolUse** (Bash matcher) | Extra safety layer beyond `deny:` rules. Block destructive patterns the permission system can't easily express: `git push --force` to protected branches, `rm -rf` against `~`/`/`, `chmod -R 777`, `curl ... | sh`. Exit 2 with explanation. | **high** |
-| **PostToolUse** (Edit/Write matcher) | Currently handled at user-project level via the format-on-save.sh template /init writes. The plugin-level version would: tag files in `.claude/kaizen/modified-this-session.log` for use by `/finish` to know exactly which files changed without re-running git diff. | medium |
-| **PostToolUseFailure** | If `npm test` or similar fails, capture last 50 lines of output to `.claude/kaizen/last-failure.log` for `/kaizen:finish` to surface. | medium |
-| **PermissionRequest** | Desktop notification when Claude is waiting for permission and the user is AFK. (macOS: `terminal-notifier`; Linux: `notify-send`.) | low |
-| **PermissionDenied** | Log to `.claude/kaizen/denied.log` for review — recurring denials suggest a permission rule should be added to `allow:`. | low |
-
-### Agent / task
-
-| Hook | Intended kaizen behavior | Priority |
-|---|---|---|
-| **SubagentStart** | Track subagent invocations per session: `<timestamp> <subagent_type> spawned by <parent>`. Useful for measuring multi-agent dispatch overhead. | low |
-| **SubagentStop** | Same log as start, with duration. Combined with SubagentStart gives subagent timing telemetry. | low |
-| **TaskCreated** | When `/kaizen:plan --seed-todos` populated TodoWrite and a task is now created, optionally sync to Linear/Jira via MCP if configured. | low |
-| **TaskCompleted** | Auto-suggest `/kaizen:finish` after the last `pending` task becomes `completed` in this session — heuristic for "user finished their planned work". | medium |
-| **TeammateIdle** | Agent teams feature — not used by kaizen yet. No planned behavior unless kaizen adds team-mode skills. | none |
-
-### Context
-
-| Hook | Intended kaizen behavior | Priority |
-|---|---|---|
-| **InstructionsLoaded** | When CLAUDE.md is loaded, check its line count. If > 200, surface a warning: `"CLAUDE.md is large; consider /kaizen:learn to move sections to rules/."` Just informational. | medium |
-| **ConfigChange** | If `.claude/settings.json` changes mid-session, validate the JSON before letting it apply. Block with exit 2 if schema-invalid (would prevent the cascade where bad settings silently break the whole session). | medium |
-| **CwdChanged** | Re-run `kaizen-detect` if the user `cd`'d into a different project. Update an in-session stack-detection cache. | low |
-| **FileChanged** | When `.env` or `package.json` changes externally, surface: `"detected external change to <file> — Claude should re-read it before next operation"`. | low |
-
-### Compaction
-
-| Hook | Intended kaizen behavior | Priority |
-|---|---|---|
-| **PreCompact** | Save `.claude/kaizen/pre-compact-state.md` with: current branch, last verdict, pending plans, open `pending.md`. Lets the user reconstruct state if compaction loses something. | medium |
-| **PostCompact** | Log compaction stats (input tokens before / after). Useful telemetry for understanding context efficiency. | low |
-
-### Notification & MCP
-
-| Hook | Intended kaizen behavior | Priority |
-|---|---|---|
-| **Notification** | Route Claude Code notifications to desktop (`terminal-notifier`/`notify-send`) when user is AFK. Configurable by notification type. | medium |
-| **Elicitation** | If an MCP server requests input, log the request to `.claude/kaizen/mcp-elicitations.log` for audit. | low |
-| **ElicitationResult** | Append the user's response to the same audit log. | low |
-
-### Worktree
-
-| Hook | Intended kaizen behavior | Priority |
-|---|---|---|
-| **WorktreeCreate** | When Claude creates a worktree, copy `.claude/` config + run a light `kaizen-detect` to confirm the worktree inherits the right setup. Also honor `.worktreeinclude` if present. | medium |
-| **WorktreeRemove** | Cleanup any kaizen state files (`.claude/kaizen/*.md`) that don't belong in the parent worktree's git index. | low |
-
-### Implementation order (suggestion)
-
-If we tackle hooks across multiple releases, this is the order I'd implement:
-
-1. **v0.11 high-priority batch**: `Stop`, `PreToolUse` (safety), `SessionStart` (richer state). These three deliver the most "orquestación sincronizada" feeling.
-2. **v0.12 medium batch**: `SessionEnd`, `Setup`, `PostToolBatch`, `TaskCompleted`, `InstructionsLoaded`, `ConfigChange`, `PreCompact`, `Notification`, `WorktreeCreate`.
-3. **v0.13 polish batch**: the remaining low-priority items.
-
-Each release activates only the hooks it implements (selective entries in `hooks.json` — not the full `hooks.json.example` template).
-
----
+| `SessionEnd` | append a one-line session summary for retrospectives | medium |
+| `PostToolBatch` | format a whole batch of edits at once instead of per file | medium |
+| `TaskCompleted` | suggest `/kaizen:finish` when the last planned task closes | medium |
+| `InstructionsLoaded` | warn when `CLAUDE.md` grows past ~200 lines | medium |
+| `ConfigChange` | validate `settings.json` before it takes effect | medium |
+| `PreCompact` | save branch, verdict and pending state so it survives compaction | medium |
+| `Notification` | route notifications to the desktop when the user is away | medium |
+| `WorktreeCreate` | carry `.claude/` config into a new worktree | medium |
+| `PostToolUseFailure` | capture a failing test run for `/kaizen:finish` to surface | medium |
+| `PermissionDenied` | log recurring denials that suggest a missing `allow` rule | low |
+| `SubagentStart` / `SubagentStop` | subagent timing telemetry | low |
+| `UserPromptSubmit` / `UserPromptExpansion` | usage signal | low |
+| `StopFailure`, `PostCompact`, `CwdChanged`, `FileChanged`, `Elicitation*`, `TaskCreated`, `WorktreeRemove`, `Setup`, `TeammateIdle` | see git history for the original notes | low / none |
 
 ## MCP Integration
 

@@ -1,0 +1,545 @@
+#!/usr/bin/env python3
+"""kaizen :: kaizen-doctor
+
+Deterministic health check of a project's Claude Code configuration, and of the
+environment kaizen is running in. Emits findings as JSON on stdout; the
+/kaizen:doctor skill turns them into prose and proposes fixes.
+
+    kaizen-doctor              # every check, JSON to stdout
+    kaizen-doctor --text       # a readable summary instead
+
+Every finding carries a `severity`, an `id`, what was found, and where. Nothing
+is ever modified — doctor diagnoses, the user decides.
+
+Severity contract, which the skill must preserve:
+  problem — kaizen can PROVE this is broken (a hook pointing at a missing file)
+  warning — probably wrong, or a cost worth knowing (an oversized CLAUDE.md)
+  info    — kaizen does not recognise it, which is not the same as invalid
+
+That last tier is the important one. This registry cannot be an exhaustive list
+of everything Claude Code accepts, so an unfamiliar key is reported as
+unfamiliar — never as an error. A doctor that cries wolf the day a new settings
+key ships is worse than no doctor.
+
+Exit codes: 0 healthy or warnings only · 1 at least one problem · 2 usage error.
+"""
+
+import argparse
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+PLUGIN_ROOT = os.path.dirname(HERE)
+
+
+def load_registry():
+    for candidate in (
+        os.environ.get("KAIZEN_COMPAT_DIR"),
+        os.path.join(os.environ.get("CLAUDE_PLUGIN_ROOT", ""), "compat"),
+        os.path.join(PLUGIN_ROOT, "compat"),
+    ):
+        if not candidate:
+            continue
+        path = os.path.join(candidate, "claude-code.json")
+        if os.path.isfile(path):
+            try:
+                with open(path, encoding="utf-8") as fh:
+                    return json.load(fh), path
+            except ValueError as exc:
+                sys.stderr.write("kaizen-doctor: compat registry is invalid JSON: %s\n" % exc)
+                sys.exit(2)
+    sys.stderr.write("kaizen-doctor: no compat registry found\n")
+    sys.exit(2)
+
+
+class Findings(object):
+    def __init__(self):
+        self.items = []
+
+    def add(self, severity, check, summary, where=None, fix=None, detail=None):
+        self.items.append({
+            "severity": severity,
+            "check": check,
+            "summary": summary,
+            "where": where,
+            "fix": fix,
+            "detail": detail,
+        })
+
+    problem = lambda self, *a, **k: self.add("problem", *a, **k)
+    warning = lambda self, *a, **k: self.add("warning", *a, **k)
+    info = lambda self, *a, **k: self.add("info", *a, **k)
+
+    def count(self, severity):
+        return sum(1 for i in self.items if i["severity"] == severity)
+
+
+# ----------------------------------------------------------------- helpers ---
+
+
+def read_json(path):
+    with open(path, encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+SCRIPT_SUFFIXES = (".sh", ".bash", ".zsh", ".mjs", ".cjs", ".js", ".ts", ".py", ".rb", ".pl")
+
+
+def expand(command, project):
+    """Expand the variables Claude Code substitutes in a hook command."""
+    expanded = command.replace("${CLAUDE_PROJECT_DIR}", project)
+    expanded = expanded.replace("$CLAUDE_PROJECT_DIR", project)
+    expanded = expanded.replace("${CLAUDE_PLUGIN_ROOT}", PLUGIN_ROOT)
+    return expanded
+
+
+def resolve(command, project):
+    """What a hook command actually depends on.
+
+    Returns a list of (kind, value) where kind is:
+      "file" — a path that must exist and be executable
+      "prog" — a program name that must be on PATH
+      "arg"  — a script passed to an interpreter; must exist, need not be +x
+
+    Naively taking the first token as a path was wrong, and a real project caught
+    it: `node .claude/hooks/reminder.mjs` made doctor report that a file called
+    `node` did not exist. An interpreter plus a script is an entirely normal way
+    to write a hook.
+    """
+    tokens = expand(command, project).split()
+    if not tokens:
+        return []
+
+    first = tokens[0]
+    targets = []
+    if "/" in first or first.startswith("."):
+        targets.append(("file", first if os.path.isabs(first)
+                        else os.path.join(project, first)))
+    else:
+        targets.append(("prog", first))
+        # An interpreter's script argument is the thing that usually goes missing.
+        for token in tokens[1:]:
+            if token.startswith("-"):
+                continue
+            if token.endswith(SCRIPT_SUFFIXES) or "/" in token:
+                targets.append(("arg", token if os.path.isabs(token)
+                                else os.path.join(project, token)))
+                break
+    return targets
+
+
+def edit_distance(a, b):
+    """Levenshtein distance. Small enough to inline, reliable enough to trust."""
+    if len(a) < len(b):
+        a, b = b, a
+    previous = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        current = [i]
+        for j, cb in enumerate(b, 1):
+            current.append(min(previous[j] + 1,          # deletion
+                               current[j - 1] + 1,       # insertion
+                               previous[j - 1] + (ca != cb)))
+        previous = current
+    return previous[-1]
+
+
+def near_miss(name, known):
+    """Is `name` a likely typo of something in `known`?
+
+    A hook event with a misspelled name never fires and never errors — the worst
+    failure mode available, because everything looks configured. So a plausible
+    typo is reported as a problem, while a genuinely unfamiliar name is only
+    reported as unrecognised.
+
+    An edit distance of 2 catches `SesionStart`, `PostToolUseFailur` and a wrong
+    case, without flagging a real new event name that happens to start similarly.
+    """
+    best, best_distance = None, 99
+    for candidate in known:
+        if candidate == name:
+            return None
+        distance = edit_distance(candidate.lower(), name.lower())
+        if distance < best_distance:
+            best, best_distance = candidate, distance
+    return best if best_distance <= 2 else None
+
+
+# ------------------------------------------------------------------ checks ---
+
+
+def check_environment(f, registry):
+    for tool in registry.get("external_tools", []):
+        if shutil.which(tool["name"]):
+            continue
+        if tool.get("required"):
+            f.problem("environment", "`%s` is not installed" % tool["name"],
+                      fix="install %s" % tool["name"],
+                      detail=tool.get("used_for"))
+        else:
+            f.warning("environment", "`%s` is not installed" % tool["name"],
+                      fix="install %s to remove the limitation" % tool["name"],
+                      detail=tool.get("used_for"))
+
+    for binary in ("kaizen-detect", "kaizen-lock", "kaizen-standards"):
+        if not shutil.which(binary) and not os.path.isfile(os.path.join(HERE, binary)):
+            f.warning("environment", "`%s` is not on PATH" % binary,
+                      detail="Claude Code adds a plugin's bin/ to PATH while the "
+                             "plugin is enabled; outside a session you can call it "
+                             "by full path")
+
+    version = None
+    if shutil.which("claude"):
+        try:
+            out = subprocess.run(["claude", "--version"], capture_output=True,
+                                 text=True, timeout=15).stdout
+            match = re.search(r"(\d+\.\d+\.\d+)", out)
+            version = match.group(1) if match else None
+        except (OSError, subprocess.SubprocessError):
+            pass
+    if version:
+        seen = registry.get("claude_code_versions_seen", [])
+        family = ".".join(version.split(".")[:2]) + ".x"
+        if seen and family not in seen:
+            f.info("platform",
+                   "Claude Code %s is newer than the versions this registry was "
+                   "checked against (%s)" % (version, ", ".join(seen)),
+                   detail="kaizen will still work; some checks may not know about "
+                          "settings or hook events added since")
+    return version
+
+
+def check_settings(f, registry, project):
+    path = os.path.join(project, ".claude", "settings.json")
+    if not os.path.isfile(path):
+        f.warning("settings", "no .claude/settings.json",
+                  fix="/kaizen:init generates one",
+                  where=".claude/settings.json")
+        return
+    try:
+        settings = read_json(path)
+    except ValueError as exc:
+        f.problem("settings", "settings.json is not valid JSON",
+                  where=".claude/settings.json", detail=str(exc),
+                  fix="fix the syntax — Claude Code cannot load any of your "
+                      "configuration while this file is unparseable")
+        return
+
+    known = set(registry.get("settings_keys_known", []))
+    deprecated = registry.get("settings_keys_deprecated", {})
+
+    for key in sorted(settings):
+        if key in deprecated:
+            entry = deprecated[key]
+            f.problem("settings", "`%s` is deprecated" % key,
+                      where=".claude/settings.json",
+                      fix="use `%s` instead" % entry.get("replaced_by", "(see note)"),
+                      detail=entry.get("note"))
+        elif key not in known and not key.startswith("_"):
+            f.info("settings", "kaizen does not recognise the key `%s`" % key,
+                   where=".claude/settings.json",
+                   detail="this is not an error — it may be newer than kaizen's "
+                          "registry, or specific to your setup")
+
+    perms = settings.get("permissions")
+    if isinstance(perms, dict):
+        for key in sorted(perms):
+            if key not in registry.get("permissions_keys_known", []):
+                f.info("settings", "unrecognised permissions key `%s`" % key,
+                       where=".claude/settings.json")
+        mode = perms.get("defaultMode")
+        if mode and mode not in registry.get("permissions_default_modes", []):
+            f.warning("settings", "`defaultMode: %s` is not a mode kaizen knows" % mode,
+                      where=".claude/settings.json",
+                      detail="valid values kaizen knows: %s"
+                             % ", ".join(registry.get("permissions_default_modes", [])))
+        for bucket in ("allow", "deny", "ask"):
+            for entry in perms.get(bucket, []) or []:
+                if not isinstance(entry, str):
+                    f.problem("settings", "non-string entry in permissions.%s" % bucket,
+                              where=".claude/settings.json", detail=repr(entry))
+                elif "(" in entry and not entry.rstrip().endswith(")"):
+                    f.warning("settings",
+                              "permission entry looks unbalanced: `%s`" % entry,
+                              where=".claude/settings.json",
+                              detail="a malformed rule silently matches nothing")
+
+    check_hooks(f, registry, project, settings.get("hooks"),
+                ".claude/settings.json")
+
+    status_line = settings.get("statusLine")
+    if isinstance(status_line, dict) and status_line.get("command"):
+        for kind, target in resolve(status_line["command"], project):
+            if kind == "prog":
+                if not shutil.which(target):
+                    f.problem("settings", "statusLine needs `%s`, which is not "
+                              "installed" % target, where=".claude/settings.json")
+            elif not os.path.exists(target):
+                f.problem("settings", "statusLine points at a file that does not exist",
+                          where=".claude/settings.json", detail=target,
+                          fix="restore the script, or remove the statusLine block")
+            elif kind == "file" and not os.access(target, os.X_OK):
+                f.problem("settings", "the statusLine script is not executable",
+                          where=target, fix="chmod +x %s" % target)
+
+
+def check_hooks(f, registry, project, hooks, source):
+    if not isinstance(hooks, dict):
+        return
+    known_events = registry.get("hook_events_known", [])
+    deprecated_events = registry.get("hook_events_deprecated", {})
+
+    for event, entries in hooks.items():
+        if event.startswith("_"):
+            continue
+        if event in deprecated_events:
+            f.problem("hooks", "hook event `%s` is deprecated" % event,
+                      where=source,
+                      fix="use `%s`" % deprecated_events[event].get("replaced_by", "(see note)"))
+        elif event not in known_events:
+            guess = near_miss(event, known_events)
+            if guess:
+                f.problem("hooks",
+                          "hook event `%s` looks like a misspelling of `%s`"
+                          % (event, guess),
+                          where=source,
+                          fix="rename it to `%s`" % guess,
+                          detail="a misspelled event never fires and never errors, "
+                                 "so the hook looks configured and does nothing")
+            else:
+                f.info("hooks", "kaizen does not recognise the hook event `%s`" % event,
+                       where=source,
+                       detail="it may be newer than kaizen's registry")
+
+        for entry in entries if isinstance(entries, list) else []:
+            for hook in (entry.get("hooks", []) if isinstance(entry, dict) else []):
+                command = hook.get("command")
+                if not command:
+                    continue
+                for kind, target in resolve(command, project):
+                    if kind == "prog":
+                        if not shutil.which(target):
+                            f.problem("hooks",
+                                      "`%s` hook needs `%s`, which is not installed"
+                                      % (event, target), where=source,
+                                      fix="install %s, or rewrite the hook" % target)
+                    elif kind == "arg":
+                        if not os.path.exists(target):
+                            f.problem("hooks",
+                                      "`%s` hook runs a script that does not exist"
+                                      % event, where=source, detail=target,
+                                      fix="restore the script, or remove this hook — "
+                                          "Claude Code errors on every %s event" % event)
+                    else:
+                        if not os.path.exists(target):
+                            f.problem("hooks",
+                                      "`%s` hook points at a file that does not exist"
+                                      % event, where=source, detail=target,
+                                      fix="restore the script, or remove this hook — "
+                                          "Claude Code errors on every %s event" % event)
+                        elif not os.access(target, os.X_OK):
+                            f.problem("hooks", "`%s` hook script is not executable"
+                                      % event, where=target,
+                                      fix="chmod +x %s" % target)
+
+
+def check_claude_md(f, registry, project):
+    path = os.path.join(project, "CLAUDE.md")
+    if not os.path.isfile(path):
+        f.warning("claude_md", "no CLAUDE.md",
+                  fix="/kaizen:init generates one")
+        return
+    with open(path, encoding="utf-8", errors="replace") as fh:
+        text = fh.read()
+    lines = len(text.splitlines())
+    if lines >= registry.get("claude_md_lines_problem", 400):
+        f.problem("claude_md", "CLAUDE.md is %d lines" % lines, where="CLAUDE.md",
+                  fix="move path-specific guidance into .claude/rules/, which "
+                      "loads only when those paths are touched",
+                  detail="this is read into every session, so its length is a "
+                         "recurring cost")
+    elif lines >= registry.get("claude_md_lines_warn", 200):
+        f.warning("claude_md", "CLAUDE.md is %d lines" % lines, where="CLAUDE.md",
+                  fix="consider moving sections into .claude/rules/")
+
+    for marker in re.findall(r"\{\{[A-Z_]+\}\}|KAIZEN_(?:ENRICH|STANDARDS):[a-z_.]+", text):
+        f.problem("claude_md", "an unsubstituted template marker survived: %s" % marker,
+                  where="CLAUDE.md",
+                  fix="re-run /kaizen:init --force, or replace the marker by hand")
+
+
+def check_rules_and_agents(f, project):
+    rules_dir = os.path.join(project, ".claude", "rules")
+    if os.path.isdir(rules_dir):
+        for name in sorted(os.listdir(rules_dir)):
+            if not name.endswith(".md"):
+                continue
+            path = os.path.join(rules_dir, name)
+            with open(path, encoding="utf-8", errors="replace") as fh:
+                text = fh.read()
+            if not text.startswith("---"):
+                f.warning("rules", "`%s` has no frontmatter" % name,
+                          where=os.path.join(".claude/rules", name),
+                          detail="without a `paths:` list the rule loads in every "
+                                 "session, whether it is relevant or not")
+            elif "paths:" not in text.split("---")[1]:
+                f.warning("rules", "`%s` declares no `paths:`" % name,
+                          where=os.path.join(".claude/rules", name),
+                          detail="it will load unconditionally")
+
+    agents_dir = os.path.join(project, ".claude", "agents")
+    if os.path.isdir(agents_dir):
+        for name in sorted(os.listdir(agents_dir)):
+            if not name.endswith(".md"):
+                continue
+            path = os.path.join(agents_dir, name)
+            with open(path, encoding="utf-8", errors="replace") as fh:
+                text = fh.read()
+            if not text.startswith("---"):
+                f.problem("agents", "`%s` has no frontmatter" % name,
+                          where=os.path.join(".claude/agents", name),
+                          detail="Claude Code cannot load an agent without one")
+                continue
+            head = text.split("---")[1]
+            for field in ("name", "description"):
+                if not re.search(r"^%s:" % field, head, re.MULTILINE):
+                    f.problem("agents", "`%s` is missing `%s:`" % (name, field),
+                              where=os.path.join(".claude/agents", name))
+            declared = re.search(r"^name:\s*(\S+)", head, re.MULTILINE)
+            if declared and declared.group(1) != name[:-3]:
+                f.warning("agents",
+                          "`%s` declares name `%s`" % (name, declared.group(1)),
+                          where=os.path.join(".claude/agents", name),
+                          detail="the filename and the declared name usually match")
+
+
+def check_lock(f, project):
+    lock_path = os.path.join(project, ".claude", "kaizen", "lock.json")
+    if not os.path.isfile(lock_path):
+        f.warning("lock", "no configuration lock",
+                  fix="/kaizen:init records one; an existing config can adopt one "
+                      "with `kaizen-lock write`",
+                  detail="without it /kaizen:upgrade cannot tell your edits from "
+                         "kaizen's output, and the only update path is overwriting")
+        return
+    try:
+        lock = read_json(lock_path)
+    except ValueError as exc:
+        f.problem("lock", "lock.json is not valid JSON",
+                  where=".claude/kaizen/lock.json", detail=str(exc),
+                  fix="re-record it with `kaizen-lock write`")
+        return
+
+    if subprocess.run(["git", "rev-parse", "--git-dir"], cwd=project,
+                      capture_output=True).returncode == 0:
+        ignored = subprocess.run(
+            ["git", "check-ignore", "-q", ".claude/kaizen/lock.json"],
+            cwd=project, capture_output=True).returncode == 0
+        if ignored:
+            f.problem("lock", "the lock file is gitignored",
+                      where=".gitignore",
+                      fix="ignore `.claude/kaizen/*` and un-ignore "
+                          "`!.claude/kaizen/lock.json` and `!.claude/kaizen/baseline/`",
+                      detail="an ignored lock means a teammate cloning this repo "
+                             "cannot upgrade the configuration safely")
+
+    missing = []
+    for entry in lock.get("files", []):
+        path = entry.get("path", "")
+        if not os.path.isfile(os.path.join(project, ".claude", "kaizen", "baseline", path)):
+            missing.append(path)
+    if missing:
+        f.warning("lock", "%d recorded file(s) have no baseline snapshot" % len(missing),
+                  where=".claude/kaizen/baseline/", detail=", ".join(missing[:8]),
+                  fix="`/kaizen:upgrade` will fall back to a plain diff for these "
+                      "instead of a 3-way merge")
+
+    if not lock.get("placeholders"):
+        f.info("lock", "the lock records no placeholder values",
+               where=".claude/kaizen/lock.json",
+               detail="written before kaizen tracked them; /kaizen:upgrade will "
+                      "have to infer them from the baselines")
+
+
+def check_standards(f, project):
+    lock_path = os.path.join(project, ".claude", "kaizen", "lock.json")
+    if not os.path.isfile(lock_path):
+        return
+    try:
+        locked = read_json(lock_path).get("standards_version")
+    except ValueError:
+        return
+    if not locked or locked == "unset":
+        return
+
+    binary = shutil.which("kaizen-standards") or os.path.join(HERE, "kaizen-standards")
+    if not os.path.isfile(binary):
+        return
+    try:
+        out = subprocess.run([sys.executable, binary, "version"],
+                             capture_output=True, text=True, timeout=30).stdout
+        current = json.loads(out).get("standards_version")
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return
+    if current and current != locked:
+        f.warning("standards",
+                  "config was generated against standards@%s; the catalog is now %s"
+                  % (locked, current),
+                  fix="/kaizen:upgrade to see what changed",
+                  detail="rules may have been added, changed or deprecated since")
+
+
+# -------------------------------------------------------------------- main ---
+
+
+def main():
+    parser = argparse.ArgumentParser(prog="kaizen-doctor",
+                                     description="Diagnose a project's Claude Code configuration.")
+    parser.add_argument("--text", action="store_true", help="readable summary instead of JSON")
+    parser.add_argument("--project", default=os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd()))
+    args = parser.parse_args()
+
+    project = os.path.abspath(args.project)
+    registry, registry_path = load_registry()
+    f = Findings()
+
+    version = check_environment(f, registry)
+    check_settings(f, registry, project)
+    check_claude_md(f, registry, project)
+    check_rules_and_agents(f, project)
+    check_lock(f, project)
+    check_standards(f, project)
+
+    problems, warnings = f.count("problem"), f.count("warning")
+    verdict = "BROKEN" if problems else ("WARNINGS" if warnings else "HEALTHY")
+
+    if args.text:
+        print("kaizen doctor · %s" % verdict)
+        print("  claude code: %s" % (version or "unknown"))
+        print("  compat registry: %s" % registry.get("compat_version"))
+        for item in f.items:
+            mark = {"problem": "✗", "warning": "!", "info": "·"}[item["severity"]]
+            print("  %s %s%s" % (mark, item["summary"],
+                                 " (%s)" % item["where"] if item["where"] else ""))
+            if item["fix"]:
+                print("      fix: %s" % item["fix"])
+    else:
+        print(json.dumps({
+            "verdict": verdict,
+            "claude_code_version": version,
+            "compat_version": registry.get("compat_version"),
+            "compat_registry": registry_path,
+            "project": project,
+            "summary": {"problem": problems, "warning": warnings,
+                        "info": f.count("info")},
+            "findings": f.items,
+        }, indent=2))
+
+    return 1 if problems else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
