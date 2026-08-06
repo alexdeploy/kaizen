@@ -363,11 +363,11 @@ def _check_settings_baseline(r):
 # Content that must be refused, and content that must not be. Same reasoning as
 # the safety hook: a detector that fires on ordinary code gets deleted.
 SECRET_MUST_BLOCK = [
-    ('const apiKey = "EXAMPLE0NOT0A0REAL0CREDENTIAL00000";', "long opaque value"
-    # Deliberately shaped like NO real provider's key. An earlier version of
-    # this fixture imitated a Stripe live key, and GitHub push protection
-    # rejected the push — correctly. Test data for a secret detector must
-    # trigger the detector without being mistakable for a real credential.),
+    # Shaped like NO real provider's key, deliberately. An earlier version of this
+    # fixture imitated a Stripe live key and GitHub push protection rejected the
+    # push — correctly. Test data for a secret detector has to trigger the
+    # detector without being mistakable for a real credential by anything else.
+    ('const apiKey = "EXAMPLE0NOT0A0REAL0CREDENTIAL00000";', "long opaque value"),
     ('AWS_KEY = "AKIAIOSFODNN7EXAMPLE"', "AWS access key"),
     ("-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA\n", "PEM private key"),
 ]
