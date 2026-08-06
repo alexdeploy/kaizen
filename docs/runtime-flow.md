@@ -1,3 +1,16 @@
+> ## ⚠ This document is stale
+>
+> It describes kaizen as of **v0.12.0** and knows nothing about the configuration
+> lock, `/kaizen:upgrade`, the standards catalog, workspace detection, or
+> `/kaizen:analyze` verifying rules by id.
+>
+> Current documentation: **[user-manual.md](./user-manual.md)** (how to use it),
+> **[technical-manual.md](./technical-manual.md)** (how it works),
+> **[architecture.md](./architecture.md)** (per-skill depth).
+>
+> Kept because its decision trees for `/init` and `/learn` are still largely
+> accurate. Rewrite or delete — do not extend.
+
 # Runtime flow — kaizen skills
 
 > Decision trees, action sequences, and worked scenarios. Mermaid diagrams render in GitHub, VS Code (Markdown Preview Mermaid Support), and most modern markdown viewers.
