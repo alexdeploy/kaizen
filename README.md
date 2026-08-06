@@ -19,6 +19,36 @@
 - `/kaizen:finish` — **end-of-task orchestrator**. Chains deterministic checks + 4 parallel agents (security + commit + bump + docs) into a unified verdict and per-concern guidance.
 - `/kaizen:upgrade` — **(unreleased, `next` branch)** updates a project's generated config to the current plugin version **without overwriting your customisations**. Uses the lock file to tell untouched files from edited ones, and `git merge-file` for the rest. Plans before it writes. See [Configuration lock](#configuration-lock).
 
+## Standards catalog
+
+The rules kaizen writes into your `CLAUDE.md` are **versioned data with
+provenance**, not prose baked into a template:
+
+```bash
+kaizen-standards show TS-003
+```
+
+```json
+{
+  "id": "TS-003",
+  "statement": "**No `any`.** Use `unknown` and narrow.",
+  "rationale": "`any` disables checking for every expression it touches, and it spreads…",
+  "sources": [{ "label": "TypeScript Handbook — unknown", "url": "…" }],
+  "added": "2026-08-05",
+  "check": { "type": "grep", "pattern": ": any\\b|\\bas any\\b" }
+}
+```
+
+Every generated line carries its id (`<!-- TS-003 -->`), so any rule in your
+config can be traced back to its reasoning, its source and its date. The catalog
+is versioned independently of the plugin (`2026.08` — calendar versioning,
+because freshness is the point), which is what lets practices update without
+waiting for a plugin release.
+
+It also closes a real gap: a rule's *statement* and the *check* that verifies it
+are now one object with a stable id. Previously they lived in different files and
+were matched by substring, so rewording a convention silently disabled its check.
+
 ## Configuration lock
 
 `/kaizen:init` records exactly what it wrote — a hash per file in

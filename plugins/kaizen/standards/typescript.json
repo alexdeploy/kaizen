@@ -1,0 +1,183 @@
+{
+  "_comment": "TypeScript / JavaScript rules. Extracted from the v0.12 typescript-node templates, with the rationale that was previously implicit and the checks that previously lived in analyze/SKILL.md's pattern library.",
+  "domain": "typescript",
+  "rules": [
+    {
+      "id": "TS-001",
+      "title": "No default exports",
+      "statement": "**Named exports only.** No default exports.",
+      "rationale": "A default export is renamed silently at every import site, so a rename refactor cannot be verified mechanically. Named exports also make re-export barrels diffable and let editors auto-import reliably.",
+      "sources": [
+        { "label": "TypeScript Handbook — Modules", "url": "https://www.typescriptlang.org/docs/handbook/modules/introduction.html" }
+      ],
+      "added": "2026-08-05",
+      "severity": "convention",
+      "status": "active",
+      "applies_to": { "stack": ["typescript", "javascript"], "maturity": ["scaffold", "small", "mature"] },
+      "surface": "claude_md.conventions",
+      "check": {
+        "type": "grep",
+        "pattern": "^export default",
+        "include": ["*.ts", "*.tsx", "*.js", "*.jsx"],
+        "exclude": ["node_modules/**", "dist/**", "*.d.ts"],
+        "note": "Vue SFCs and Svelte components export the component as default by convention — excluded deliberately."
+      }
+    },
+    {
+      "id": "TS-002",
+      "title": "Tests live next to their source",
+      "statement": "**Tests next to source**: `foo.ts` → `foo.test.ts`. Integration tests in `tests/`.",
+      "rationale": "A test beside its subject is found when the subject is edited, and moves with it. A parallel test tree drifts: files get renamed on one side only, and nobody notices the orphan.",
+      "sources": [],
+      "added": "2026-08-05",
+      "severity": "convention",
+      "status": "active",
+      "applies_to": { "stack": ["typescript", "javascript"], "maturity": ["small", "mature"] },
+      "surface": "claude_md.conventions",
+      "check": {
+        "type": "sibling_file",
+        "include": ["*.ts", "*.tsx"],
+        "exclude": ["*.test.*", "*.spec.*", "*.d.ts", "tests/**", "node_modules/**", "dist/**"],
+        "pattern": "{basename}.test.*",
+        "note": "Reported as partial coverage, not a violation — not every file warrants a test."
+      }
+    },
+    {
+      "id": "TS-003",
+      "title": "No `any`",
+      "statement": "**No `any`.** Use `unknown` and narrow.",
+      "rationale": "`any` disables checking for every expression it touches, and it spreads: one `any` at a boundary silently untypes everything downstream. `unknown` keeps the value opaque until it is actually narrowed, which is the check you wanted.",
+      "sources": [
+        { "label": "TypeScript Handbook — unknown", "url": "https://www.typescriptlang.org/docs/handbook/2/functions.html#unknown" }
+      ],
+      "added": "2026-08-05",
+      "severity": "convention",
+      "status": "active",
+      "applies_to": { "stack": ["typescript"], "maturity": ["scaffold", "small", "mature"] },
+      "surface": "claude_md.conventions",
+      "check": {
+        "type": "grep",
+        "pattern": ": any\\b|\\bas any\\b",
+        "include": ["*.ts", "*.tsx"],
+        "exclude": ["node_modules/**", "dist/**", "*.d.ts"],
+        "note": "Declaration files are excluded — third-party shims frequently need `any`."
+      }
+    },
+    {
+      "id": "TS-004",
+      "title": "No `console.log` in committed code",
+      "statement": "**No `console.log` in committed code.** Use a logger.",
+      "rationale": "`console.log` has no level, no structure and no destination control, so it cannot be filtered in production and frequently leaks values that should not be in logs. A logger gives all three.",
+      "sources": [],
+      "added": "2026-08-05",
+      "severity": "convention",
+      "status": "active",
+      "applies_to": { "stack": ["typescript", "javascript"], "maturity": ["small", "mature"] },
+      "surface": "claude_md.conventions",
+      "check": {
+        "type": "grep",
+        "pattern": "console\\.log",
+        "include": ["*.ts", "*.tsx", "*.js", "*.jsx"],
+        "exclude": ["*.test.*", "*.spec.*", "tests/**", "node_modules/**", "dist/**", "scripts/**"]
+      }
+    },
+    {
+      "id": "TS-005",
+      "title": "Throw Error subclasses, not strings",
+      "statement": "**Errors are typed.** Throw `Error` subclasses, not strings.",
+      "rationale": "A thrown string has no stack trace, which removes the single most useful piece of debugging information at exactly the moment it is needed. `instanceof` on an Error subclass also lets callers handle failures selectively.",
+      "sources": [
+        { "label": "MDN — Error", "url": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error" }
+      ],
+      "added": "2026-08-05",
+      "severity": "convention",
+      "status": "active",
+      "refines": "UNI-004",
+      "applies_to": { "stack": ["typescript", "javascript"], "maturity": ["small", "mature"] },
+      "surface": "claude_md.conventions",
+      "check": {
+        "type": "grep",
+        "pattern": "throw ['\"`]",
+        "include": ["*.ts", "*.tsx", "*.js", "*.jsx"],
+        "exclude": ["node_modules/**", "dist/**"]
+      }
+    },
+    {
+      "id": "TS-006",
+      "title": "No unexplained `eslint-disable`",
+      "statement": "No `eslint-disable` without a comment explaining why.",
+      "rationale": "A silent disable is indistinguishable from a mistake, so nobody dares remove it and it outlives the problem it worked around. The explanation is what makes it removable later.",
+      "sources": [],
+      "added": "2026-08-05",
+      "severity": "convention",
+      "status": "active",
+      "applies_to": { "stack": ["typescript", "javascript"], "maturity": ["small", "mature"] },
+      "surface": "claude_md.never",
+      "check": {
+        "type": "grep",
+        "pattern": "eslint-disable",
+        "include": ["*.ts", "*.tsx", "*.js", "*.jsx"],
+        "exclude": ["node_modules/**", "dist/**"],
+        "note": "A violation is a disable with no justification on the same line."
+      }
+    },
+    {
+      "id": "TS-007",
+      "title": "Descriptive test names",
+      "statement": "Descriptive names: `should [expected] when [condition]`.",
+      "rationale": "A failing test's name is the entire bug report in CI output. `test 3 fails` costs a debugging session that `should reject expired tokens when the clock has advanced` would have prevented.",
+      "sources": [],
+      "added": "2026-08-05",
+      "severity": "convention",
+      "status": "active",
+      "applies_to": { "stack": ["typescript", "javascript"], "maturity": ["scaffold", "small", "mature"] },
+      "surface": "rules_testing.conventions",
+      "check": { "type": "none", "reason": "naming quality is not mechanically decidable" }
+    },
+    {
+      "id": "TS-008",
+      "title": "Clean up side effects",
+      "statement": "Clean up side effects in `afterEach` / `afterAll`.",
+      "rationale": "Uncleaned state is the mechanism behind order-dependent suites (UNI-005): the leak is created by one test and only observed by another, so the failure blames innocent code.",
+      "sources": [],
+      "added": "2026-08-05",
+      "severity": "safety",
+      "status": "active",
+      "applies_to": { "stack": ["typescript", "javascript"], "maturity": ["small", "mature"] },
+      "surface": "rules_testing.conventions",
+      "check": { "type": "none", "reason": "requires knowing which setup created state" }
+    },
+    {
+      "id": "TS-009",
+      "title": "No real time in tests",
+      "statement": "No tests that depend on real wall-clock time without freezing it (`vi.useFakeTimers()` / `jest.useFakeTimers()`).",
+      "rationale": "A test that reads the real clock fails at midnight, at a month boundary, in another timezone, or under CI load — always intermittently, and always for a reason unrelated to the code under test.",
+      "sources": [],
+      "added": "2026-08-05",
+      "severity": "safety",
+      "status": "active",
+      "applies_to": { "stack": ["typescript", "javascript"], "maturity": ["small", "mature"] },
+      "surface": "rules_testing.never",
+      "check": {
+        "type": "grep",
+        "pattern": "Date\\.now\\(\\)|new Date\\(\\)",
+        "include": ["*.test.ts", "*.test.tsx", "*.spec.ts", "*.spec.tsx"],
+        "exclude": ["node_modules/**"],
+        "note": "Heuristic: flags real-clock reads in test files, including legitimate ones inside a frozen-timer block. Reported for review, not as a hard violation."
+      }
+    },
+    {
+      "id": "TS-010",
+      "title": "No snapshots of non-deterministic data",
+      "statement": "No snapshots of components with non-deterministic data.",
+      "rationale": "A snapshot containing a timestamp, a random id or an unordered map fails on the next run for no reason, and the fix everyone reaches for — updating the snapshot — silently accepts whatever else changed with it.",
+      "sources": [],
+      "added": "2026-08-05",
+      "severity": "safety",
+      "status": "active",
+      "applies_to": { "stack": ["typescript", "javascript"], "maturity": ["small", "mature"] },
+      "surface": "rules_testing.never",
+      "check": { "type": "none", "reason": "determinism of snapshot content is not statically decidable" }
+    }
+  ]
+}

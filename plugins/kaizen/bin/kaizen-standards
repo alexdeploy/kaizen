@@ -1,0 +1,271 @@
+#!/usr/bin/env python3
+"""kaizen :: kaizen-standards
+
+Query and render the standards catalog — the versioned, sourced rules that
+/kaizen:init writes into a project's CLAUDE.md and rules files.
+
+    kaizen-standards version
+    kaizen-standards list   [--stack S] [--maturity M] [--surface S] [--severity S] [--status S] [--json]
+    kaizen-standards show   <RULE-ID>
+    kaizen-standards render --surface S [--stack S] [--maturity M]
+    kaizen-standards checks [--stack S]            # rules that /kaizen:analyze can verify
+
+`render` is the one the skills use: it emits the exact markdown lines to place
+at a <!-- KAIZEN_STANDARDS:<surface> --> marker, in a deterministic order, so no
+model has to decide formatting or ordering.
+
+Python rather than bash on purpose — see
+docs/decisions/0006-python-for-structured-runtime-scripts.md.
+
+Exit codes: 0 ok · 1 not found / empty result · 2 usage or catalog error.
+"""
+
+import argparse
+import json
+import os
+import sys
+
+SEVERITY_RANK = {"security": 0, "safety": 1, "convention": 2}
+
+
+def catalog_dir():
+    override = os.environ.get("KAIZEN_STANDARDS_DIR")
+    if override:
+        return override
+    plugin_root = os.environ.get("CLAUDE_PLUGIN_ROOT")
+    if plugin_root and os.path.isdir(os.path.join(plugin_root, "standards")):
+        return os.path.join(plugin_root, "standards")
+    here = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(os.path.dirname(here), "standards")
+
+
+def die(message, code=2):
+    sys.stderr.write("kaizen-standards: %s\n" % message)
+    sys.exit(code)
+
+
+def load_catalog():
+    root = catalog_dir()
+    index_path = os.path.join(root, "index.json")
+    if not os.path.isfile(index_path):
+        die("no catalog at %s (set KAIZEN_STANDARDS_DIR to override)" % root)
+
+    try:
+        with open(index_path, encoding="utf-8") as fh:
+            index = json.load(fh)
+    except ValueError as exc:
+        die("index.json is not valid JSON: %s" % exc)
+
+    rules = []
+    for domain in index.get("domains", []):
+        path = os.path.join(root, domain["file"])
+        if not os.path.isfile(path):
+            die("catalog declares %s but the file is missing" % domain["file"])
+        try:
+            with open(path, encoding="utf-8") as fh:
+                data = json.load(fh)
+        except ValueError as exc:
+            die("%s is not valid JSON: %s" % (domain["file"], exc))
+        for rule in data.get("rules", []):
+            rule["_domain"] = data.get("domain", domain["file"])
+            rule["_domain_order"] = len(rules)
+            rules.append(rule)
+
+    # Domain order follows index.json; rules sort by id inside a domain. This is
+    # what makes render output stable across runs and machines.
+    domain_order = {d["file"].replace(".json", ""): i
+                    for i, d in enumerate(index.get("domains", []))}
+    rules.sort(key=lambda r: (domain_order.get(r["_domain"], 99), r["id"]))
+    return index, rules
+
+
+# ------------------------------------------------------------- filtering ---
+
+
+def matches(rule, stacks, maturity, surface, severity, status):
+    if status != "any" and rule.get("status") != status:
+        return False
+    if surface and rule.get("surface") != surface:
+        return False
+    if severity and rule.get("severity") != severity:
+        return False
+
+    applies = rule.get("applies_to", {})
+
+    if stacks:
+        rule_stacks = applies.get("stack", ["*"])
+        if "*" not in rule_stacks and not (set(rule_stacks) & set(stacks)):
+            return False
+
+    if maturity:
+        rule_maturity = applies.get("maturity")
+        if rule_maturity and maturity not in rule_maturity:
+            return False
+
+    return True
+
+
+def select(rules, args):
+    stacks = [s.strip() for s in (args.stack or "").split(",") if s.strip()]
+    return [
+        r for r in rules
+        if matches(
+            r, stacks,
+            getattr(args, "maturity", None),
+            getattr(args, "surface", None),
+            getattr(args, "severity", None),
+            getattr(args, "status", "active"),
+        )
+    ]
+
+
+def public(rule):
+    """Strip the internal bookkeeping keys before emitting a rule."""
+    return {k: v for k, v in rule.items() if not k.startswith("_")}
+
+
+def drop_superseded(selected):
+    """Suppress a general rule when a selected rule refines it.
+
+    A TypeScript project should be told "throw Error subclasses", not that plus
+    the vaguer "throw domain-specific error types" it specialises. The general
+    rule still renders for stacks that have no specialisation.
+    """
+    refined = {r["refines"] for r in selected if r.get("refines")}
+    return [r for r in selected if r["id"] not in refined]
+
+
+# -------------------------------------------------------------- commands ---
+
+
+def cmd_version(index, rules, args):
+    by_status = {}
+    by_severity = {}
+    for rule in rules:
+        by_status[rule.get("status", "?")] = by_status.get(rule.get("status", "?"), 0) + 1
+        by_severity[rule.get("severity", "?")] = by_severity.get(rule.get("severity", "?"), 0) + 1
+    checkable = sum(1 for r in rules if r.get("check", {}).get("type", "none") != "none")
+
+    print(json.dumps({
+        "standards_version": index.get("standards_version"),
+        "catalog_schema": index.get("catalog_schema"),
+        "catalog_dir": catalog_dir(),
+        "domains": [d["file"] for d in index.get("domains", [])],
+        "surfaces": sorted(index.get("surfaces", {})),
+        "rules": len(rules),
+        "by_status": by_status,
+        "by_severity": by_severity,
+        "mechanically_checkable": checkable,
+    }, indent=2))
+    return 0
+
+
+def cmd_list(index, rules, args):
+    selected = select(rules, args)
+    if args.json:
+        print(json.dumps([public(r) for r in selected], indent=2))
+    else:
+        for rule in selected:
+            print("%-8s %-11s %-26s %s" % (
+                rule["id"], rule.get("severity", ""),
+                rule.get("surface", ""), rule.get("title", ""),
+            ))
+    return 0 if selected else 1
+
+
+def cmd_show(index, rules, args):
+    for rule in rules:
+        if rule["id"].upper() == args.rule_id.upper():
+            print(json.dumps(public(rule), indent=2))
+            return 0
+    die("no rule with id %s" % args.rule_id, code=1)
+
+
+def cmd_render(index, rules, args):
+    if args.surface not in index.get("surfaces", {}):
+        die("unknown surface %r (known: %s)"
+            % (args.surface, ", ".join(sorted(index.get("surfaces", {})))))
+
+    selected = drop_superseded(select(rules, args))
+    if not selected:
+        # A surface with no applicable rule is a real situation (an unknown
+        # stack has no rules yet). Say so in-band and exit 1 so the caller
+        # falls back to the template's own placeholder rather than shipping an
+        # empty section.
+        print("<!-- no standards apply to this project for %s -->" % args.surface)
+        return 1
+
+    for rule in selected:
+        statement = rule["statement"].rstrip()
+        prefix = "" if statement.startswith("-") else "- "
+        # The id comment is what lets any line in a user's CLAUDE.md be traced
+        # back to the rule that produced it (ADR-0005).
+        print("%s%s <!-- %s -->" % (prefix, statement, rule["id"]))
+    return 0
+
+
+def cmd_checks(index, rules, args):
+    """Rules /kaizen:analyze can verify mechanically, with their patterns."""
+    selected = [r for r in select(rules, args)
+                if r.get("check", {}).get("type", "none") != "none"]
+    print(json.dumps([
+        {"id": r["id"], "title": r.get("title"), "severity": r.get("severity"),
+         "statement": r.get("statement"), "check": r.get("check")}
+        for r in selected
+    ], indent=2))
+    return 0 if selected else 1
+
+
+# ------------------------------------------------------------------ main ---
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        prog="kaizen-standards",
+        description="Query and render the kaizen standards catalog.",
+    )
+    sub = parser.add_subparsers(dest="command")
+
+    def add_filters(p, with_surface=True):
+        p.add_argument("--stack", help="comma-separated detect tokens, e.g. 'frontend,typescript'")
+        p.add_argument("--maturity", choices=["empty", "scaffold", "small", "mature"])
+        if with_surface:
+            p.add_argument("--surface")
+        p.add_argument("--severity", choices=["security", "safety", "convention"])
+        p.add_argument("--status", default="active",
+                       choices=["active", "deprecated", "any"])
+
+    sub.add_parser("version", help="catalog version and counts")
+
+    p_list = sub.add_parser("list", help="list matching rules")
+    add_filters(p_list)
+    p_list.add_argument("--json", action="store_true", help="full rule objects")
+
+    p_show = sub.add_parser("show", help="one rule, in full")
+    p_show.add_argument("rule_id", metavar="RULE-ID")
+
+    p_render = sub.add_parser("render", help="markdown lines for a template surface")
+    add_filters(p_render, with_surface=False)
+    p_render.add_argument("--surface", required=True)
+
+    p_checks = sub.add_parser("checks", help="rules that can be verified mechanically")
+    add_filters(p_checks)
+
+    args = parser.parse_args()
+    if not args.command:
+        parser.print_help()
+        return 2
+
+    index, rules = load_catalog()
+    handler = {
+        "version": cmd_version,
+        "list": cmd_list,
+        "show": cmd_show,
+        "render": cmd_render,
+        "checks": cmd_checks,
+    }[args.command]
+    return handler(index, rules, args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

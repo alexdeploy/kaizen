@@ -1564,3 +1564,148 @@ Every other ambition in [ROADMAP.md](../ROADMAP.md) depends on it. A versioned
 standards catalog is only useful if projects can *move between versions*
 safely. A `/kaizen:doctor` that detects stale configuration needs a safe way to
 fix it. Without the lock, each of those degrades back into "overwrite and hope".
+
+---
+
+# 18. The standards catalog (unreleased — `next` branch)
+
+> Where the rules in a user's `CLAUDE.md` come from, why each one exists, and
+> how they change without a plugin release. Decision record:
+> [ADR-0005](./decisions/0005-standards-as-versioned-data.md).
+
+## What changed
+
+Before: a convention was a line of prose inside a template.
+
+```markdown
+## Conventions
+- **No `any`.** Use `unknown` and narrow.
+```
+
+After: a convention is a rule in a versioned catalog, and the template holds a
+marker where the applicable rules get rendered.
+
+```markdown
+## Conventions
+
+<!-- KAIZEN_STANDARDS:claude_md.conventions -->
+```
+
+The prose is now **data with provenance**:
+
+```json
+{
+  "id": "TS-003",
+  "statement": "**No `any`.** Use `unknown` and narrow.",
+  "rationale": "`any` disables checking for every expression it touches, and it spreads…",
+  "sources": [{ "label": "TypeScript Handbook — unknown", "url": "…" }],
+  "added": "2026-08-05",
+  "severity": "convention",
+  "applies_to": { "stack": ["typescript"], "maturity": ["scaffold", "small", "mature"] },
+  "surface": "claude_md.conventions",
+  "check": { "type": "grep", "pattern": ": any\\b|\\bas any\\b", "include": ["*.ts"], "exclude": ["*.d.ts"] }
+}
+```
+
+## The three problems this solves
+
+1. **Release coupling.** The catalog is versioned separately
+   (`standards_version: "2026.08"`, calendar versioning because freshness is the
+   point). Practices can ship without a plugin release.
+2. **Unarguable rules.** Every rule carries a rationale, a source and a date, so
+   a team can evaluate it instead of just obeying or deleting it. Rules that
+   still lack a source are reported by the harness on every run — currently 17
+   of 31, which is a real debt made visible rather than hidden.
+3. **Statement and check drifting apart.** The rule text lived in a template;
+   the check that verified it lived in `analyze/SKILL.md`'s pattern library,
+   joined by case-insensitive substring matching. Rewording a convention
+   silently un-checked it. Now the statement and its check are one object with a
+   stable id.
+
+## Layout
+
+```
+plugins/kaizen/standards/
+├── index.json        version, surfaces, severities, statuses, check types
+├── universal.json    UNI-*  stack-agnostic
+├── typescript.json   TS-*
+└── python.json       PY-*
+```
+
+**Surfaces** are the places a rule can render. Adding one means declaring it in
+`index.json` *and* placing the marker in a template — the harness checks both
+directions.
+
+| Surface | Target |
+|---|---|
+| `claude_md.conventions` | `CLAUDE.md` → `## Conventions` |
+| `claude_md.never` | `CLAUDE.md` → `## Never do` |
+| `rules_testing.conventions` | `.claude/rules/testing.md` → `## Conventions` |
+| `rules_testing.never` | `.claude/rules/testing.md` → `## Never` |
+
+## `kaizen-standards`
+
+Python 3, stdlib only ([ADR-0006](./decisions/0006-python-for-structured-runtime-scripts.md)).
+
+| Subcommand | Purpose |
+|---|---|
+| `version` | Catalog version and counts |
+| `list [filters]` | Matching rules, table or `--json` |
+| `show <ID>` | One rule in full — the traceability path from a line in `CLAUDE.md` back to its reasoning |
+| `render --surface S --stack S --maturity M` | **The one the skills use.** Deterministic markdown lines, ready to paste at a marker |
+| `checks [--stack S]` | Rules `/kaizen:analyze` can verify, with their patterns |
+
+`render` is deterministic by design: domain order follows `index.json`, rules
+sort by id inside a domain. An unstable order would make every `/kaizen:upgrade`
+show phantom changes for files nobody touched.
+
+Exit code 1 from `render` means *no rule applies* — an unknown stack, or a
+project too young for a rule's `maturity`. `/kaizen:init` falls back to the
+template's placeholder rather than shipping an empty section.
+
+## Rule refinement
+
+A stack-specific rule may declare `refines: <ID>`:
+
+```
+UNI-004  "Errors are typed. Throw domain-specific error types…"
+   ↑ refined by
+TS-005   "Errors are typed. Throw Error subclasses, not strings."
+```
+
+When both would render into the same project, the general one is suppressed. A
+TypeScript project is told the precise thing once, not the vague thing plus the
+precise thing. The general rule still renders for stacks with no specialisation.
+
+This was found by running the renderer, not by reading it — the first render of
+a TypeScript project emitted both lines.
+
+## Traceability
+
+Every rendered line carries its id:
+
+```markdown
+- **No `any`.** Use `unknown` and narrow. <!-- TS-003 -->
+```
+
+Costing roughly five tokens per rule in a file loaded every session, paid
+deliberately: it is what lets `/kaizen:analyze` check the right rule, what lets
+`/kaizen:upgrade` recognise a rule that moved, and what lets a user run
+`kaizen-standards show TS-003` and read *why*.
+
+## What the harness guards
+
+`tests/suites/test_standards.py`, 873 checks:
+
+- Schema completeness on every rule, unique well-formed ids, ISO dates.
+- `severity` / `status` / `surface` / `check.type` all declared in `index.json`.
+- `applies_to.stack` values are tokens `kaizen-detect` can actually emit.
+- `refines` and `deprecated_by` point at rules that exist.
+- Every check pattern compiles **and is compatible with ripgrep** — no
+  lookaround, no backreferences. A pattern that compiles in Python but fails in
+  the Grep tool is a check that silently never runs; one such pattern existed
+  and was caught here.
+- Markers in templates and surfaces in the index agree, in both directions.
+- `render` is deterministic, ids are attached, refinement suppression works,
+  and the empty case exits 1.
+- Rules with no source are reported (warning) rather than quietly accepted.

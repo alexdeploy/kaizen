@@ -1,0 +1,260 @@
+{
+  "_comment": "Python rules. Extracted from the v0.12 python templates, with the rationale that was previously implicit and the checks that previously lived in analyze/SKILL.md's pattern library.",
+  "domain": "python",
+  "rules": [
+    {
+      "id": "PY-001",
+      "title": "Type hints everywhere",
+      "statement": "**Type hints everywhere.** Use modern syntax: `list[int]`, `dict[str, X]`, `X | None`.",
+      "rationale": "Hints are the only machine-checkable documentation of intent a Python codebase has. Without them a refactor is a search-and-hope exercise, and tools like mypy have nothing to check.",
+      "sources": [
+        { "label": "PEP 484 — Type Hints", "url": "https://peps.python.org/pep-0484/" },
+        { "label": "PEP 604 — X | Y union syntax", "url": "https://peps.python.org/pep-0604/" }
+      ],
+      "added": "2026-08-05",
+      "severity": "convention",
+      "status": "active",
+      "applies_to": { "stack": ["python"], "maturity": ["scaffold", "small", "mature"] },
+      "surface": "claude_md.conventions",
+      "check": { "type": "none", "reason": "coverage of hints is mypy's job, not a grep's" }
+    },
+    {
+      "id": "PY-002",
+      "title": "Prefer module-level functions over deep class hierarchies",
+      "statement": "**Module-level functions over deep class hierarchies.** Prefer composition.",
+      "rationale": "Inheritance couples subclasses to a base's internals, and each level makes behaviour harder to locate. A module function is directly testable and has no hidden state from three classes up.",
+      "sources": [],
+      "added": "2026-08-05",
+      "severity": "convention",
+      "status": "active",
+      "applies_to": { "stack": ["python"], "maturity": ["small", "mature"] },
+      "surface": "claude_md.conventions",
+      "check": { "type": "none", "reason": "depth thresholds produce more false positives than value" }
+    },
+    {
+      "id": "PY-003",
+      "title": "No wildcard imports",
+      "statement": "**No `from x import *`.** Explicit imports only.",
+      "rationale": "A wildcard import makes the origin of every name unknowable without running the code, silently shadows locals when the upstream module adds a name, and defeats every static tool that resolves references.",
+      "sources": [
+        { "label": "PEP 8 — Imports", "url": "https://peps.python.org/pep-0008/#imports" }
+      ],
+      "added": "2026-08-05",
+      "severity": "convention",
+      "status": "active",
+      "applies_to": { "stack": ["python"], "maturity": ["scaffold", "small", "mature"] },
+      "surface": "claude_md.conventions",
+      "check": {
+        "type": "grep",
+        "pattern": "^from .* import \\*",
+        "include": ["*.py"],
+        "exclude": [".venv/**", "venv/**", "build/**"]
+      }
+    },
+    {
+      "id": "PY-004",
+      "title": "Docstrings on public functions",
+      "statement": "**Docstrings for public functions** — one-line summary, blank line, body if needed.",
+      "rationale": "A public function's contract lives in someone's head until it is written down. The one-line summary is what shows up in editors and generated docs, which is where it is actually read.",
+      "sources": [
+        { "label": "PEP 257 — Docstring Conventions", "url": "https://peps.python.org/pep-0257/" }
+      ],
+      "added": "2026-08-05",
+      "severity": "convention",
+      "status": "active",
+      "applies_to": { "stack": ["python"], "maturity": ["small", "mature"] },
+      "surface": "claude_md.conventions",
+      "check": { "type": "none", "reason": "presence is checkable, quality is not; left to ruff's pydocstyle rules" }
+    },
+    {
+      "id": "PY-005",
+      "title": "Use pathlib, not os.path",
+      "statement": "**Use `pathlib.Path`**, not `os.path`.",
+      "rationale": "`os.path` manipulates paths as strings, which is where separator and encoding bugs come from. `Path` carries platform semantics with it and makes the common operations obvious.",
+      "sources": [
+        { "label": "Python docs — pathlib", "url": "https://docs.python.org/3/library/pathlib.html" }
+      ],
+      "added": "2026-08-05",
+      "severity": "convention",
+      "status": "active",
+      "applies_to": { "stack": ["python"], "maturity": ["scaffold", "small", "mature"] },
+      "surface": "claude_md.conventions",
+      "check": {
+        "type": "grep",
+        "pattern": "^import os\\.path|from os import path|os\\.path\\.join",
+        "include": ["*.py"],
+        "exclude": [".venv/**", "venv/**", "build/**"]
+      }
+    },
+    {
+      "id": "PY-006",
+      "title": "Custom exceptions per domain",
+      "statement": "**Errors are typed.** Custom exceptions per domain, not `raise Exception`.",
+      "rationale": "`except Exception` is the only way to catch a bare `Exception`, and that clause also swallows every unrelated failure. Domain exceptions let a caller handle the case it understands and let the rest propagate.",
+      "sources": [
+        { "label": "Python docs — User-defined Exceptions", "url": "https://docs.python.org/3/tutorial/errors.html#user-defined-exceptions" }
+      ],
+      "added": "2026-08-05",
+      "severity": "convention",
+      "status": "active",
+      "refines": "UNI-004",
+      "applies_to": { "stack": ["python"], "maturity": ["small", "mature"] },
+      "surface": "claude_md.conventions",
+      "check": {
+        "type": "grep",
+        "pattern": "raise Exception\\(",
+        "include": ["*.py"],
+        "exclude": [".venv/**", "venv/**", "build/**"]
+      }
+    },
+    {
+      "id": "PY-007",
+      "title": "No print() for logging",
+      "statement": "No `print()` for logging — use the `logging` module.",
+      "rationale": "`print` writes to stdout with no level and no structure, so it cannot be filtered, routed or silenced in production — and in a CLI it corrupts the actual output the program is supposed to produce.",
+      "sources": [
+        { "label": "Python docs — logging", "url": "https://docs.python.org/3/library/logging.html" }
+      ],
+      "added": "2026-08-05",
+      "severity": "convention",
+      "status": "active",
+      "applies_to": { "stack": ["python"], "maturity": ["small", "mature"] },
+      "surface": "claude_md.never",
+      "check": {
+        "type": "grep",
+        "pattern": "^\\s*print\\(",
+        "include": ["*.py"],
+        "exclude": ["tests/**", "scripts/**", "__main__.py", ".venv/**", "venv/**"]
+      }
+    },
+    {
+      "id": "PY-008",
+      "title": "No bare except",
+      "statement": "No bare `except:` — always catch specific exceptions.",
+      "rationale": "A bare except also catches `KeyboardInterrupt` and `SystemExit`, so it makes a program that cannot be stopped, and it hides the programming errors it was never meant to handle.",
+      "sources": [
+        { "label": "PEP 8 — Programming Recommendations", "url": "https://peps.python.org/pep-0008/#programming-recommendations" }
+      ],
+      "added": "2026-08-05",
+      "severity": "safety",
+      "status": "active",
+      "applies_to": { "stack": ["python"], "maturity": ["scaffold", "small", "mature"] },
+      "surface": "claude_md.never",
+      "check": {
+        "type": "grep",
+        "pattern": "except\\s*:\\s*$",
+        "include": ["*.py"],
+        "exclude": [".venv/**", "venv/**", "build/**"]
+      }
+    },
+    {
+      "id": "PY-009",
+      "title": "No mutable default arguments",
+      "statement": "No mutable default arguments (`def f(x=[])`).",
+      "rationale": "A default is evaluated once at definition time, so the same list or dict is shared by every call. The resulting state leak between unrelated calls is one of the hardest Python bugs to see in review.",
+      "sources": [
+        { "label": "Python tutorial — Default Argument Values", "url": "https://docs.python.org/3/tutorial/controlflow.html#default-argument-values" }
+      ],
+      "added": "2026-08-05",
+      "severity": "safety",
+      "status": "active",
+      "applies_to": { "stack": ["python"], "maturity": ["scaffold", "small", "mature"] },
+      "surface": "claude_md.never",
+      "check": {
+        "type": "grep",
+        "pattern": "def \\w+\\([^)]*=\\s*(\\[\\]|\\{\\})",
+        "include": ["*.py"],
+        "exclude": [".venv/**", "venv/**", "build/**"]
+      }
+    },
+    {
+      "id": "PY-010",
+      "title": "Behaviour-describing test names",
+      "statement": "Test names describe behavior: `test_<what>_<when>_<expected>`.",
+      "rationale": "pytest prints the test name and nothing else when a test fails. A name that states the expected behaviour turns that line into a bug report.",
+      "sources": [],
+      "added": "2026-08-05",
+      "severity": "convention",
+      "status": "active",
+      "applies_to": { "stack": ["python"], "maturity": ["scaffold", "small", "mature"] },
+      "surface": "rules_testing.conventions",
+      "check": { "type": "none", "reason": "naming quality is not mechanically decidable" }
+    },
+    {
+      "id": "PY-011",
+      "title": "Fixtures over bare setup functions",
+      "statement": "Use **fixtures** (`@pytest.fixture`) for setup, not bare functions.",
+      "rationale": "A fixture is scoped, composable and torn down automatically. A hand-rolled setup function is none of those, and its teardown is skipped whenever a test fails early — which is exactly when cleanup matters.",
+      "sources": [
+        { "label": "pytest — How to use fixtures", "url": "https://docs.pytest.org/en/stable/how-to/fixtures.html" }
+      ],
+      "added": "2026-08-05",
+      "severity": "convention",
+      "status": "active",
+      "applies_to": { "stack": ["python"], "maturity": ["small", "mature"] },
+      "surface": "rules_testing.conventions",
+      "check": { "type": "none", "reason": "requires knowing which functions are setup" }
+    },
+    {
+      "id": "PY-012",
+      "title": "Parametrize instead of copy-pasting tests",
+      "statement": "**Parametrize** (`@pytest.mark.parametrize`) over copy-pasted tests.",
+      "rationale": "Copy-pasted cases drift: a fix applied to one and not the others leaves a test that passes for the wrong reason. Parametrization keeps one body and names each case in the failure output.",
+      "sources": [
+        { "label": "pytest — Parametrizing tests", "url": "https://docs.pytest.org/en/stable/how-to/parametrize.html" }
+      ],
+      "added": "2026-08-05",
+      "severity": "convention",
+      "status": "active",
+      "applies_to": { "stack": ["python"], "maturity": ["small", "mature"] },
+      "surface": "rules_testing.conventions",
+      "check": { "type": "none", "reason": "duplication detection needs structural comparison" }
+    },
+    {
+      "id": "PY-013",
+      "title": "No sleep in tests",
+      "statement": "No `time.sleep()` in tests — use `freezegun` or `pytest-freezer`.",
+      "rationale": "A sleep is either too short (flaky under load) or too long (slow suite), and usually both across machines. It also hides the actual synchronisation the code needs.",
+      "sources": [],
+      "added": "2026-08-05",
+      "severity": "safety",
+      "status": "active",
+      "applies_to": { "stack": ["python"], "maturity": ["scaffold", "small", "mature"] },
+      "surface": "rules_testing.never",
+      "check": {
+        "type": "grep",
+        "pattern": "time\\.sleep\\(",
+        "include": ["test_*.py", "*_test.py", "tests/**/*.py"],
+        "exclude": [".venv/**", "venv/**"]
+      }
+    },
+    {
+      "id": "PY-014",
+      "title": "No real network or database in tests",
+      "statement": "No real network or DB calls — use fakes (`respx`, `responses`) or a test double.",
+      "rationale": "A test that reaches the network fails when the network does, passes when a remote is silently broken, and cannot run in CI without credentials. None of those outcomes tells you anything about your code.",
+      "sources": [],
+      "added": "2026-08-05",
+      "severity": "safety",
+      "status": "active",
+      "applies_to": { "stack": ["python"], "maturity": ["small", "mature"] },
+      "surface": "rules_testing.never",
+      "check": { "type": "none", "reason": "requires call-graph analysis to distinguish fakes from real clients" }
+    },
+    {
+      "id": "PY-015",
+      "title": "Filesystem access stays inside tmp_path",
+      "statement": "No tests that depend on filesystem state outside the `tmp_path` fixture.",
+      "rationale": "A test writing outside its temp directory pollutes the working copy, collides with parallel runs, and can destroy real files when a path is computed wrong.",
+      "sources": [
+        { "label": "pytest — tmp_path", "url": "https://docs.pytest.org/en/stable/how-to/tmp_path.html" }
+      ],
+      "added": "2026-08-05",
+      "severity": "safety",
+      "status": "active",
+      "applies_to": { "stack": ["python"], "maturity": ["small", "mature"] },
+      "surface": "rules_testing.never",
+      "check": { "type": "none", "reason": "path destinations are computed at runtime" }
+    }
+  ]
+}

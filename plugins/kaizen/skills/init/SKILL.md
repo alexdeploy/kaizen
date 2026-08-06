@@ -2,7 +2,7 @@
 description: Bootstrap the Claude Code configuration for this project. Detects stack and maturity, then scaffolds a tailored CLAUDE.md, settings.json, rules, agents, and hooks. Works on empty AND existing projects. Supports profiles (minimal/standard/advanced) controlling how much workflow scaffolding to include.
 disable-model-invocation: true
 argument-hint: "[--preset <name>] [--profile=<minimal|standard|advanced>] [--force] [--minimal]"
-allowed-tools: Read, Write, Edit, Glob, Grep, Bash(kaizen-detect), Bash(kaizen-detect *), Bash(kaizen-lock *), Bash(git *), Bash(chmod *), Bash(test *), Bash(ls *), Bash(find *), Bash(mkdir *)
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash(kaizen-detect), Bash(kaizen-detect *), Bash(kaizen-lock *), Bash(kaizen-standards *), Bash(git *), Bash(chmod *), Bash(test *), Bash(ls *), Bash(find *), Bash(mkdir *)
 ---
 
 # /kaizen:init
@@ -61,6 +61,54 @@ These are the ONLY placeholders you substitute. Be exact — wrong values are bu
 - Never invent values to fill placeholders.
 
 ---
+
+## Standards markers (v0.14+) — `<!-- KAIZEN_STANDARDS:<surface> -->`
+
+**These are not enrichment directives and you do not write their content.** The
+rules a project gets are data, not prose you compose: they live in the versioned
+catalog at `<plugin>/standards/`, each with a rationale, a source and a date
+(see `docs/decisions/0005-standards-as-versioned-data.md`).
+
+For each `<!-- KAIZEN_STANDARDS:<surface> -->` marker in a template, replace the
+marker line with the **verbatim stdout** of:
+
+```
+kaizen-standards render --surface <surface> --stack <detect.stack> --maturity <detect.maturity>
+```
+
+Pass `detect.stack` exactly as detected (the raw CSV, e.g. `frontend,typescript`)
+and `detect.maturity` unchanged.
+
+Hard rules for this marker type:
+
+- **Paste the output verbatim.** Do not reword a rule, reorder lines, merge two
+  rules, drop one you disagree with, or add one that is not in the output. The
+  ordering is deterministic on purpose.
+- **Keep the `<!-- ID -->` comments.** They are what lets a line in the user's
+  `CLAUDE.md` be traced back to the rule that produced it, and what
+  `/kaizen:analyze` uses to check the right thing.
+- **Never invent a rule.** If the project needs something the catalog lacks,
+  that goes in the Suggestions section of the report, not into the file.
+- **Exit code 1 means no rule applies** (an unknown stack, or a project too
+  young for a rule's `maturity`). Then, and only then, write the fallback line
+  for that surface:
+  - `claude_md.conventions` → `- <Add the rules Claude must follow always>`
+  - `claude_md.never` → `- <Hard rules. If something must hold ALWAYS, consider a hook in `.claude/settings.json` instead>`
+  - `rules_testing.*` → `- <Add project-specific testing rules here>`
+- **If `kaizen-standards` is unavailable** (command not found, or a broken
+  catalog), do not improvise the rules from memory. Read the catalog JSON files
+  directly with the Read tool and apply the same filters by hand, or — if the
+  catalog is unreadable — write the fallback line and record it in the drift
+  report as `⚠ standards unavailable; section left as placeholder`.
+
+Record each filled surface in the drift report:
+
+```
+CLAUDE.md:
+  ✎ Standards [claude_md.conventions]: 5 rules from standards@<version> (TS-001, TS-002, …)
+```
+
+Get `<version>` from `kaizen-standards version`.
 
 ## Enrichment directive registry
 

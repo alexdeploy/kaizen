@@ -22,12 +22,7 @@
 
 ## Conventions
 
-- **Type hints everywhere.** Use modern syntax: `list[int]`, `dict[str, X]`, `X | None`.
-- **Module-level functions over deep class hierarchies.** Prefer composition.
-- **No `from x import *`.** Explicit imports only.
-- **Docstrings for public functions** — one-line summary, blank line, body if needed.
-- **Use `pathlib.Path`**, not `os.path`.
-- **Errors are typed.** Custom exceptions per domain, not `raise Exception`.
+<!-- KAIZEN_STANDARDS:claude_md.conventions -->
 
 ## Architecture (brief)
 
@@ -37,7 +32,5 @@ For path-specific conventions, see [.claude/rules/](./.claude/rules/).
 
 ## Never do
 
-- No direct commits to `main`.
-- No `print()` for logging — use `logging` module.
-- No bare `except:` — always catch specific exceptions.
-- No mutable default arguments (`def f(x=[])`).
+<!-- KAIZEN_STANDARDS:claude_md.never -->
+

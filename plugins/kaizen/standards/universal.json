@@ -1,0 +1,84 @@
+{
+  "_comment": "Stack-agnostic rules. Rendered into every project regardless of detected stack.",
+  "domain": "universal",
+  "rules": [
+    {
+      "id": "UNI-001",
+      "title": "No direct commits to the default branch",
+      "statement": "No direct commits to `main` / `master`.",
+      "rationale": "A commit that lands without review skips every gate the project has — CI, review, and kaizen's own preflight. The cost of a branch is seconds; the cost of an unreviewed commit on the default branch is however long it takes someone to notice.",
+      "sources": [],
+      "added": "2026-08-05",
+      "severity": "safety",
+      "status": "active",
+      "applies_to": { "stack": ["*"], "maturity": ["scaffold", "small", "mature"] },
+      "surface": "claude_md.never",
+      "check": { "type": "none", "reason": "requires branch protection state, not file content" }
+    },
+    {
+      "id": "UNI-002",
+      "title": "No new runtime dependencies without justification",
+      "statement": "No new runtime dependencies without justification.",
+      "rationale": "Every runtime dependency is permanent supply-chain surface, install weight, and a future upgrade obligation. Dev dependencies are cheap to remove; runtime ones end up in the shipped artifact and in every consumer's tree.",
+      "sources": [],
+      "added": "2026-08-05",
+      "severity": "security",
+      "status": "active",
+      "applies_to": { "stack": ["*"], "maturity": ["small", "mature"] },
+      "surface": "claude_md.never",
+      "check": { "type": "none", "reason": "justification is prose in a PR, not a file pattern" }
+    },
+    {
+      "id": "UNI-003",
+      "title": "No editing build output by hand",
+      "statement": "No editing generated or build output (`dist/`, `build/`, `target/`) by hand.",
+      "rationale": "A hand edit to generated output is erased by the next build, and in the meantime the source and the artifact disagree — which produces bugs that cannot be reproduced from the repository.",
+      "sources": [],
+      "added": "2026-08-05",
+      "severity": "safety",
+      "status": "active",
+      "applies_to": { "stack": ["*"], "maturity": ["scaffold", "small", "mature"] },
+      "surface": "claude_md.never",
+      "check": { "type": "none", "reason": "requires diff history, not a static pattern" }
+    },
+    {
+      "id": "UNI-004",
+      "title": "Errors carry a type",
+      "statement": "**Errors are typed.** Throw domain-specific error types, not bare strings or generic exceptions.",
+      "rationale": "A caller can only handle an error it can distinguish. A thrown string or a generic exception forces every handler into message matching, which breaks the moment someone rewords the message.",
+      "sources": [],
+      "added": "2026-08-05",
+      "severity": "convention",
+      "status": "active",
+      "applies_to": { "stack": ["*"], "maturity": ["small", "mature"] },
+      "surface": "claude_md.conventions",
+      "check": { "type": "none", "reason": "stack-specific; see TS-005 and PY-006" }
+    },
+    {
+      "id": "UNI-005",
+      "title": "Tests must be order-independent",
+      "statement": "Tests must be order-independent — no test may depend on another having run first.",
+      "rationale": "Order dependence turns a test suite into a single fragile test. It breaks under parallel execution, under `--only`, and under any future runner change, and the failure blames the wrong test.",
+      "sources": [],
+      "added": "2026-08-05",
+      "severity": "safety",
+      "status": "active",
+      "applies_to": { "stack": ["*"], "maturity": ["scaffold", "small", "mature"] },
+      "surface": "rules_testing.conventions",
+      "check": { "type": "none", "reason": "detectable only by running the suite shuffled" }
+    },
+    {
+      "id": "UNI-006",
+      "title": "Mock external dependencies only",
+      "statement": "Mock **external** dependencies only (network, filesystem, third-party APIs). Never mock internal modules.",
+      "rationale": "Mocking an internal module tests the mock, not the code. It also freezes the internal shape, so any refactor breaks tests that were supposed to prove the refactor was safe.",
+      "sources": [],
+      "added": "2026-08-05",
+      "severity": "convention",
+      "status": "active",
+      "applies_to": { "stack": ["*"], "maturity": ["small", "mature"] },
+      "surface": "rules_testing.conventions",
+      "check": { "type": "none", "reason": "requires knowing which modules are internal" }
+    }
+  ]
+}

@@ -21,7 +21,7 @@
 
 ## Conventions
 
-- <Add the rules Claude must follow always>
+<!-- KAIZEN_STANDARDS:claude_md.conventions -->
 
 ## Architecture (brief)
 
@@ -29,4 +29,5 @@
 
 ## Never do
 
-- <Hard rules. If something must hold ALWAYS, consider a hook in `.claude/settings.json` instead>
+<!-- KAIZEN_STANDARDS:claude_md.never -->
+

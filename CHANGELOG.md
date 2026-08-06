@@ -10,6 +10,55 @@ While v0.x, **minor versions may include breaking changes**. From v1.0.0 onward,
 
 ## [Unreleased]
 
+### Added — standards catalog with provenance (branch `next`)
+
+Phase 2 of [ROADMAP.md](./ROADMAP.md). Conventions move out of template prose
+and into versioned data, so practices can ship without a plugin release and
+every rule can be traced to its reasoning. Decision record:
+[ADR-0005](./docs/decisions/0005-standards-as-versioned-data.md).
+
+- **`plugins/kaizen/standards/`** — 31 rules across `universal`, `typescript`
+  and `python` domains, extracted from the v0.12 templates. Each carries a
+  statement, rationale, sources, date, severity, applicability
+  (stack × maturity), the surface it renders into, and its verification check.
+  Versioned independently as `standards_version: "2026.08"` (calendar
+  versioning — freshness is the value).
+- **`bin/kaizen-standards`** — `version` / `list` / `show` / `render` / `checks`.
+  Python 3 stdlib only ([ADR-0006](./docs/decisions/0006-python-for-structured-runtime-scripts.md)).
+  `render` emits deterministic markdown for a template surface; an unstable
+  order would make every `/kaizen:upgrade` show phantom changes.
+- **Templates became renderers.** The hand-written Conventions / Never do /
+  testing-rule lists are replaced by `<!-- KAIZEN_STANDARDS:<surface> -->`
+  markers that `/kaizen:init` fills from the catalog for the detected stack and
+  maturity. Rendered lines carry their rule id as an HTML comment.
+- **Rule refinement** — a stack-specific rule may `refine` a general one, which
+  is then suppressed for that project. Found by running the renderer: a
+  TypeScript project was getting both the vague and the precise version of the
+  same rule.
+- **`tests/suites/test_standards.py`** — 873 checks: schema, unique ids, ISO
+  dates, declared severities/surfaces/check types, `applies_to.stack` values
+  that `kaizen-detect` can actually emit, `refines`/`deprecated_by` targets that
+  exist, template markers and index surfaces agreeing in both directions, and
+  deterministic rendering.
+- **Check patterns are validated against ripgrep's dialect.** The Grep tool has
+  no lookaround or backreferences; a pattern using them compiles in Python and
+  silently never matches where it runs. One such pattern existed (TS-006) and
+  was fixed.
+- The harness now reports that **17 of 31 rules have no source** — a real debt,
+  deliberately surfaced as a warning on every run rather than hidden.
+- Docs: [`docs/architecture.md` §18](./docs/architecture.md), a README section,
+  and the decision records in [`docs/decisions/`](./docs/decisions/README.md).
+
+### Added — decision records and handoff notes
+
+- **[`docs/decisions/`](./docs/decisions/README.md)** — ADRs for every
+  structural choice made so far, including the ones that look arbitrary without
+  their reasoning (why the model never merges, why the lock is committed, why
+  `/kaizen:upgrade` was the one new verb allowed).
+- **[`HANDOFF.md`](./HANDOFF.md)** — current branch, what is done and verified,
+  **what is built but not yet verified**, and the working agreements. Updated at
+  the end of every session so a lost context can be rebuilt from the repo.
+
 ### Added — configuration lock + `/kaizen:upgrade` (branch `next`)
 
 The first phase of the direction proposed in [ROADMAP.md](./ROADMAP.md): kaizen
