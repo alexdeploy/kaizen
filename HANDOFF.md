@@ -5,17 +5,23 @@
 > If it disagrees with reality, reality wins — verify before trusting a line.
 
 **Last updated**: 2026-08-06
-**Working branch**: `next`
+**Released**: v0.13.0 is tagged and merged to `main`
+**Working branch**: `next` (even with `main` at the release)
 **Comparison point**: tag `baseline-v0.12.1` (the project as it was before the
 new direction, harness included)
 
 ## Where things are
 
 ```
-main                    the plugin as shipped (v0.12.1) + the validation harness
-  └─ baseline-v0.12.1   tag: safe point to compare against or return to
-       └─ next          the new direction — everything below lives here
+baseline-v0.12.1   the project before the new direction (comparison point)
+      │
+      └─ v0.13.0   tagged on main: six phases, merged
+                   `next` and `main` are level; new work continues on `next`
 ```
+
+- What changed across the whole direction: `git diff baseline-v0.12.1..v0.13.0`
+- Return to before: `git checkout baseline-v0.12.1`
+- Undo one phase: `git revert <commit>`
 
 - Compare everything: `git diff baseline-v0.12.1..next`
 - Return: `git checkout main`
@@ -181,7 +187,8 @@ These are warnings, not failures — deliberate, and visible on purpose:
 | ✓ done | `/kaizen:analyze` reads the catalog | Reports by rule id over three populations, with provenance and a standards-status section |
 | ✓ done | Three hooks + asserted security baseline | Implemented, wired, 121 checks; 26 stubs deleted |
 | ✓ done | `/kaizen:doctor` | Platform + config health, 73 checks; found real problems in a real project |
-| ← now | Content and cleanup, not architecture | 17 sourceless rules · `go`/`rust` presets · `kaizen.config.json` · decide when `next` ships |
+| ✓ done | v0.13.0 released | Merged to `main`, tagged, versions consistent in all four places |
+| ← now | Content and cleanup, not architecture | 17 sourceless rules · `go`/`rust` presets · `kaizen.config.json` · per-package rule scoping in monorepos |
 | | Monorepo shape, `kaizen.config.json`, go/rust presets | |
 
 ## Working agreements for this project

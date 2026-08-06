@@ -96,6 +96,20 @@ def run(r):
                 "the manuals mention the `%s` executable" % binary,
             )
 
+    # --- the workflow rule kaizen WRITES must know every command ----------
+    # This file ships into user projects as their "when to run what" table. A
+    # command missing from it does not exist as far as that project is concerned.
+    workflow = os.path.join(P.TEMPLATES_DIR, "_shared", ".claude", "rules",
+                            "workflow.md")
+    if os.path.isfile(workflow):
+        text = P.read(workflow)
+        for skill in sorted(skill_names):
+            r.check(
+                "/kaizen:%s" % skill in text,
+                "the generated workflow.md mentions /kaizen:%s" % skill,
+                "it is the table a user reads to know what to run",
+            )
+
     # --- every ADR is indexed --------------------------------------------
     decisions_dir = os.path.join(P.REPO_ROOT, "docs", "decisions")
     if os.path.isdir(decisions_dir):
