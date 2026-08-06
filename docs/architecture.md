@@ -1429,7 +1429,7 @@ This is a substantial scaffold (~19 files). The user gets an opinionated, workin
 
 ---
 
-# 17. The configuration lock + `/kaizen:upgrade` runtime (unreleased — `next` branch)
+# 17. The configuration lock + `/kaizen:upgrade` runtime (v0.13.0)
 
 > Every skill up to this point either generates config or reads it. This one
 > **updates** it, which is a categorically harder problem: the file kaizen wants
@@ -1577,7 +1577,7 @@ fix it. Without the lock, each of those degrades back into "overwrite and hope".
 
 ---
 
-# 18. The standards catalog (unreleased — `next` branch)
+# 18. The standards catalog (v0.13.0)
 
 > Where the rules in a user's `CLAUDE.md` come from, why each one exists, and
 > how they change without a plugin release. Decision record:
@@ -1722,7 +1722,7 @@ deliberately: it is what lets `/kaizen:analyze` check the right rule, what lets
 
 ---
 
-# 19. `/kaizen:analyze` on the catalog (unreleased — `next` branch)
+# 19. `/kaizen:analyze` on the catalog (v0.13.0)
 
 > Supersedes the pattern-library description in §11. Decision record:
 > [ADR-0008](./decisions/0008-analyze-reports-by-rule-id.md).

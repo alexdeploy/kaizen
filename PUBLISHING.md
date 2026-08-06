@@ -1,10 +1,61 @@
-# Publishing kaizen to GitHub
+# Releasing kaizen
 
-> Step-by-step playbook to convert kaizen from a local-path marketplace into a public GitHub-hosted one. After this, anyone can install with `/plugin marketplace add alexdeploy/kaizen` and `/plugin install kaizen@kaizen` — no `--plugin-dir` hacks.
+The marketplace is already public: users install with
+`/plugin marketplace add alexdeploy/kaizen` and `/plugin install kaizen@kaizen`.
+This is the checklist for shipping a new version.
 
-**Run only when `/kaizen:learn` test is validated and you're ready for v0.3.0 to be the first public version.**
+## Release checklist
+
+```bash
+# 1. The harness must be green. Not "mostly green".
+tests/run.sh
+
+# 2. The live evals, which CI does not run because they cost tokens.
+tests/run.sh --live
+
+# 3. Bump the version in BOTH manifests. The `manifests` suite fails if they
+#    disagree with each other, with the README heading, or with the CHANGELOG.
+#      plugins/kaizen/.claude-plugin/plugin.json
+#      .claude-plugin/marketplace.json
+
+# 4. Move CHANGELOG [Unreleased] to [x.y.z] with today's date.
+
+# 5. Drop any "(unreleased)" markers from README and docs/ for what now ships.
+
+# 6. Green again — step 3 is the one people get wrong.
+tests/run.sh
+
+# 7. Merge, tag, push.
+git checkout main && git merge --no-ff next
+git tag -a vx.y.z -m "kaizen vx.y.z — <one line>"
+git push origin main --tags
+```
+
+Users update with `/plugin marketplace update kaizen`, then restart Claude Code.
+
+## What must be true before tagging
+
+- `tests/run.sh` exits 0. Warnings are acceptable and expected — they are the
+  published list of known limitations, see the README. Failures are not.
+- Everything new is in the CHANGELOG, in prose a user can act on.
+- Every structural decision has an ADR in `docs/decisions/`.
+- `HANDOFF.md` says honestly what is **not** verified. Shipping with gaps is
+  fine; shipping without naming them is not.
+- The version appears identically in: `plugin.json`, `marketplace.json`, the
+  README heading, the CHANGELOG entry.
+
+## Two things not to do
+
+- **Do not bump versions for unreleased work.** It lives under `[Unreleased]`
+  until it ships, or the number stops meaning anything.
+- **Do not tag on a red harness** on the grounds that the failure is unrelated.
+  The one time that reasoning is wrong is the time it matters.
 
 ---
+
+## Appendix — the original first-publish playbook
+
+Kept for reference; the marketplace it describes setting up already exists.
 
 ## Prerequisites
 

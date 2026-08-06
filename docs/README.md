@@ -13,7 +13,7 @@ Welcome. This folder documents how the kaizen plugin behaves **once it's install
 | Know how kaizen proves it still works before shipping | **[validation.md](./validation.md)** |
 | See the current state, including what is **not** verified | **[../HANDOFF.md](../HANDOFF.md)** |
 | Understand where the project is heading | **[../ROADMAP.md](../ROADMAP.md)** |
-| Understand the decision tree as of v0.12 (**stale**) | [runtime-flow.md](./runtime-flow.md) |
+| Follow the timeline: prompt → work → commit → months later | **[runtime-flow.md](./runtime-flow.md)** |
 
 ## At a glance
 
@@ -71,18 +71,22 @@ Welcome. This folder documents how the kaizen plugin behaves **once it's install
 - File paths are clickable links relative to the repo root.
 - Code blocks tagged `bash` are commands you run in your shell.
 - Code blocks tagged with nothing or `text` are input to Claude Code's prompt.
-- **(unreleased)** marks a feature that exists on the `next` branch but has not
-  shipped to the marketplace.
+- Diagrams are ASCII so they render anywhere, including a terminal.
 
 ## Version
 
-These docs track kaizen **0.12.1 plus the unreleased `next` branch**, with the
-standards catalog at **2026.08**.
+These docs track kaizen **0.13.0**, with the standards catalog at **2026.08** and
+the Claude Code compat registry at **2026.08**.
 
-| Document | State |
+| Document | Covers |
 |---|---|
-| user-manual.md · technical-manual.md · architecture.md · validation.md · decisions/ | current |
-| [runtime-flow.md](./runtime-flow.md) · [mcp-usage.md](./mcp-usage.md) | **stale — describe v0.12.0.** Rewrite or delete; do not extend |
+| [user-manual.md](./user-manual.md) | every command, flag, file and recovery path |
+| [technical-manual.md](./technical-manual.md) | components, artifacts, invariants, where to change what |
+| [runtime-flow.md](./runtime-flow.md) | the timeline, the decision trees, who dispatches whom |
+| [architecture.md](./architecture.md) | per-skill runtime depth, §1–19 |
+| [validation.md](./validation.md) | what the harness can and cannot prove |
+| [decisions/](./decisions/README.md) | ten ADRs |
+| [mcp-usage.md](./mcp-usage.md) | MCP recommendations — **not revisited since v0.12**; still advisory only, kaizen activates no MCP server |
 
 The harness enforces part of this: every shipped `/kaizen:*` command must appear
 in the user manual, and every ADR must be indexed with its Context / Decision /

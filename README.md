@@ -3,11 +3,11 @@
 > 改善 (kaizen) = continuous improvement.
 > A Claude Code plugin that scaffolds a complete, adapted `.claude/` setup for any project — empty or existing — and (in future versions) evolves it as the project grows.
 
-## What it does today (v0.12.1)
+## What it does today (v0.13.0)
 
 **Shipped (v0.12.1):** 8 skills, 6 plugin-level agents, 7 project-level agents in the `advanced` profile, and a profile system for `/init`.
 
-**On the `next` branch, unreleased:** a configuration lock so updates cannot destroy your edits, a versioned standards catalog with provenance, workspace/monorepo detection, `/kaizen:upgrade`, `/kaizen:doctor`, three active hooks, and a validation harness of ~1.800 checks. See [ROADMAP.md](./ROADMAP.md) for why, [docs/decisions/](./docs/decisions/README.md) for each decision, and [HANDOFF.md](./HANDOFF.md) for what is verified and what is not.
+**New in v0.13.0:** a configuration lock so updates cannot destroy your edits, a versioned standards catalog with provenance, workspace/monorepo detection, `/kaizen:upgrade`, `/kaizen:doctor`, three active hooks, and a validation harness of ~1.800 checks. See [ROADMAP.md](./ROADMAP.md) for why, [docs/decisions/](./docs/decisions/README.md) for each decision, and [HANDOFF.md](./HANDOFF.md) for what is verified and what is not.
 
 - `/kaizen:init` — bootstraps the project config. Profile flag: `--profile=<minimal|standard|advanced>` (default `standard`). The base scaffolding generates `CLAUDE.md`, settings, rules, code-reviewer agent, and hooks; standard+ profiles add a `workflow.md` rule documenting the kaizen-skill flow.
 - `/kaizen:learn` — proposes CLAUDE.md/rules updates from git activity. `--limit=<N>` / `--since=<ref>` for scope. Subcommands: `show`, `apply`, `discard`.
@@ -17,8 +17,8 @@
 - `/kaizen:docs` — surfaces user-facing documentation gaps from recent changes via the `docs-keeper` agent. Read-only.
 - `/kaizen:bump` — suggests semver bump (major/minor/patch) via the `versioner` agent. Detects changesets. Supports JS/TS, Python, Rust.
 - `/kaizen:finish` — **end-of-task orchestrator**. Chains deterministic checks + 4 parallel agents (security + commit + bump + docs) into a unified verdict and per-concern guidance.
-- `/kaizen:doctor` — **(unreleased, `next` branch)** is this setup actually working? Finds hooks pointing at missing scripts, misspelled hook events that silently never fire, deprecated settings keys, unsubstituted template markers, a gitignored lock, and missing tools. `--fix` applies only the unambiguous repairs.
-- `/kaizen:upgrade` — **(unreleased, `next` branch)** updates a project's generated config to the current plugin version **without overwriting your customisations**. Uses the lock file to tell untouched files from edited ones, and `git merge-file` for the rest. Plans before it writes. See [Configuration lock](#configuration-lock).
+- `/kaizen:doctor` — is this setup actually working? Finds hooks pointing at missing scripts, misspelled hook events that silently never fire, deprecated settings keys, unsubstituted template markers, a gitignored lock, and missing tools. `--fix` applies only the unambiguous repairs.
+- `/kaizen:upgrade` — updates a project's generated config to the current plugin version **without overwriting your customisations**. Uses the lock file to tell untouched files from edited ones, and `git merge-file` for the rest. Plans before it writes. See [Configuration lock](#configuration-lock).
 
 ## Standards catalog
 
@@ -101,6 +101,24 @@ All marked with `kaizen-managed: true` so `--force` re-init can update them. Cha
 - `versioner` — semver bump analyzer. Used by `/bump` + `/finish`.
 
 (All distinct from the project-level `.claude/agents/code-reviewer.md` that `/kaizen:init` generates — that one is user-customizable for manual review.)
+
+## Known limitations
+
+Published deliberately. The validation harness reports each of these on every
+run, so they cannot quietly rot:
+
+| Limitation | Effect |
+|---|---|
+| Six stacks (`go`, `rust`, `java`, `ruby`, `php`, `elixir`) are detected but fall back to the `generic` preset | detection promises more adaptation than the templates deliver |
+| 17 of 31 catalog rules have no source | they are kaizen's opinions rather than sourced practice, and the harness says so every run |
+| `detect_maturity` counts only source-code extensions | a repo of prose and shell scripts reports `maturity: "empty"` — kaizen's own repo included |
+| Grep-based rule checks have no comment awareness | a rule can match its own name inside a comment; affected rules carry a note and `/kaizen:analyze` prints it |
+| `PreToolUse` is a safety net, not a sandbox | it reads commands as text, so a sufficiently indirect destructive command gets through |
+| The compat registry cannot be exhaustive | an unfamiliar settings key is reported as *unrecognised*, never as invalid |
+| One root `CLAUDE.md` in a monorepo | workspaces are detected and used for layout, but per-package rule scoping is not built yet |
+
+What is built but **not yet verified in a live run** is listed in
+[HANDOFF.md](./HANDOFF.md).
 
 ## What's coming next
 

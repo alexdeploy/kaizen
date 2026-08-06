@@ -10,6 +10,22 @@ While v0.x, **minor versions may include breaking changes**. From v1.0.0 onward,
 
 ## [Unreleased]
 
+Nothing yet. See [ROADMAP.md](./ROADMAP.md) and [HANDOFF.md](./HANDOFF.md).
+
+---
+
+## [0.13.0] — 2026-08-06
+
+**The release that turns kaizen from a scaffolder into a configuration package
+manager.** Six phases, ten decision records, and a validation harness that did
+not exist before: the plugin went from zero automated verification to ~1.800
+deterministic checks plus six live behaviour evals.
+
+Read [ROADMAP.md](./ROADMAP.md) for the argument, and
+[docs/decisions/](./docs/decisions/README.md) for each decision with the
+alternatives that lost. What is built but **not** yet verified is listed honestly
+in [HANDOFF.md](./HANDOFF.md).
+
 ### Added — `/kaizen:doctor`: the other half of "breaks nothing"
 
 Phase 6. The lock stops kaizen's own updates from destroying your edits; nothing

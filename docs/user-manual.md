@@ -7,9 +7,8 @@ For *why* things are built the way they are, see
 [decisions/](./decisions/README.md). For internals, see the
 [technical manual](./technical-manual.md).
 
-**This manual tracks the `next` branch** (plugin 0.12.1 + unreleased phases,
-standards catalog `2026.08`). Features marked **(unreleased)** exist on `next`
-but have not shipped to the marketplace yet.
+**This manual tracks kaizen 0.13.0**, with the standards catalog at `2026.08`
+and the Claude Code compat registry at `2026.08`.
 
 ---
 
@@ -69,7 +68,7 @@ of querying it. It never guesses.
 | Command | Writes? | What it is |
 |---|---|---|
 | [`/kaizen:init`](#kaizeninit) | **yes** | Generate the config for this project |
-| [`/kaizen:upgrade`](#kaizenupgrade) **(unreleased)** | **yes**, only with `apply` | Adopt newer templates without losing your edits |
+| [`/kaizen:upgrade`](#kaizenupgrade) | **yes**, only with `apply` | Adopt newer templates without losing your edits |
 | [`/kaizen:learn`](#kaizenlearn) | proposes, applies on request | Propose config updates from recent commits |
 | [`/kaizen:analyze`](#kaizenanalyze) | report only | Audit code against your rules, by rule id |
 | [`/kaizen:plan`](#kaizenplan) | plan file only | Turn a spec into an annotated task tree |
@@ -77,7 +76,7 @@ of querying it. It never guesses.
 | [`/kaizen:docs`](#kaizendocs) | report only | Which docs recent changes made stale |
 | [`/kaizen:bump`](#kaizenbump) | report only | Suggest a semver bump |
 | [`/kaizen:finish`](#kaizenfinish) | report only | The end-of-task ritual, all of the above |
-| [`/kaizen:doctor`](#kaizendoctor) **(unreleased)** | report only, or `--fix` | Is this setup actually working? |
+| [`/kaizen:doctor`](#kaizendoctor) | report only, or `--fix` | Is this setup actually working? |
 
 Two rules hold across all of them:
 
@@ -154,7 +153,7 @@ that a command it wrote does not exist in your `package.json`.
 
 ---
 
-## `/kaizen:upgrade` **(unreleased)**
+## `/kaizen:upgrade`
 
 Adopt newer kaizen templates and standards **without overwriting what you
 changed**. This is what `--force` should have been.
@@ -375,7 +374,7 @@ call, not a merge blocker.
 
 ---
 
-## `/kaizen:doctor` **(unreleased)**
+## `/kaizen:doctor`
 
 Every other command assumes your configuration is valid. This one assumes it
 might not be — so it is the one to run when something is wrong, or when you
