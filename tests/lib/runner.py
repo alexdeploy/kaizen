@@ -27,6 +27,7 @@ SUITES = [
     "detect",
     "lock",
     "standards",
+    "safety",
 ]
 
 

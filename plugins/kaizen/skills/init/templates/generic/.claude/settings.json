@@ -8,14 +8,24 @@
       "Read(./**)"
     ],
     "deny": [
-      "Bash(rm -rf *)",
       "Bash(sudo *)",
+      "Bash(rm -rf /*)",
+      "Bash(rm -rf ~*)",
+      "Bash(rm -rf $HOME*)",
+      "Bash(chmod -R 777 *)",
+      "Bash(git clean *-x*)",
       "Read(./.env)",
       "Read(./.env.*)",
-      "Read(./secrets/**)"
+      "Read(./secrets/**)",
+      "Read(./**/*.pem)",
+      "Read(./**/id_rsa*)",
+      "Read(./**/.ssh/**)",
+      "Read(./**/.aws/**)"
     ],
     "ask": [
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Bash(git reset --hard *)",
+      "Bash(git rebase *)"
     ],
     "defaultMode": "default"
   },

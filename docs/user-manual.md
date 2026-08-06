@@ -374,6 +374,92 @@ call, not a merge blocker.
 
 ---
 
+## What kaizen does without being asked
+
+Three hooks run automatically once the plugin is enabled. Everything else kaizen
+does requires you to type a command.
+
+### A safety net on Bash commands
+
+Before any shell command runs, kaizen checks it against a very short list of
+things that are catastrophic and never legitimate, and **blocks** those:
+
+```
+kaizen safety: refusing to run this command.
+
+  rm -rf /
+
+This deletes the filesystem root or your entire home directory.
+```
+
+The bar for that list is deliberately extreme: a pattern is only there if no
+real task could match it. `rm -rf node_modules`, `rm -rf dist`,
+`rm -rf ~/projects/app/build`, `git clean -fd`, `chmod -R 755 ./bin` all run
+normally. What gets blocked:
+
+| Blocked | Why |
+|---|---|
+| `rm -rf /`, `rm -rf ~`, `rm -rf $HOME` | deletes the filesystem root or your home directory |
+| `curl … \| sh`, `wget … \| bash` | runs an unreviewed remote script that can change between runs |
+| `chmod -R 777 /` or `~` | makes root or home world-writable |
+| `git clean -x…` | deletes ignored files too, including `.env` and local credentials |
+
+A second, softer tier **warns without blocking**: force-push without
+`--force-with-lease`, `git reset --hard`, `npm publish`.
+
+Turn it off for a session with `KAIZEN_SAFETY=off`. It is a safety net, not a
+sandbox — a sufficiently indirect command will get through, and kaizen does not
+pretend otherwise.
+
+### An oriented session start
+
+At session start kaizen injects a few lines so Claude does not spend tool calls
+rediscovering them — and stays completely silent when there is nothing to say:
+
+```
+kaizen:
+- branch `feature/oauth`, 4 uncommitted file(s)
+- last SHIP verdict is stale — source changed since it ran
+- config was generated against standards@2026.07, catalog is now 2026.08 — `/kaizen:upgrade` to see what changed
+```
+
+### One nudge, once
+
+When source files have changed and no pre-merge check has run since, kaizen
+suggests `/kaizen:finish` — **once per session**, never repeatedly, and never
+when a fresh verdict already exists. Turn it off with `KAIZEN_NUDGE=off`.
+
+It writes nothing into your project to track this.
+
+### The permission baseline
+
+`/kaizen:init` writes a `deny` list into `.claude/settings.json` — secrets stay
+unreadable (`.env`, `secrets/`, `*.pem`, `id_rsa*`, `.ssh/`, `.aws/`), `sudo` and
+the catastrophic deletes are refused — plus an `ask` list for `git push`,
+`git reset --hard` and `git rebase`.
+
+This overlaps the hook on purpose. The hook protects any project with kaizen
+enabled; the deny list protects *this* project even with the plugin disabled.
+
+Notably absent: `Bash(rm -rf *)`. It was there, and it blocked
+`rm -rf node_modules` — a deny rule that stops real work gets the whole list
+deleted by the first person it annoys.
+
+### The hooks written into your project
+
+`/kaizen:init` also writes hooks that are yours to edit:
+
+| Hook | Does |
+|---|---|
+| `format-on-save.sh` | runs your formatter on files Claude edits |
+| `secret-detector.sh` | **blocks** a write containing a likely secret (AWS key, GitHub PAT, JWT, PEM private key, credential assignment) |
+| `session-start.sh` | project-level session context |
+| `statusline.sh` | the status line at the bottom of the TUI |
+| `dependency-changed.sh` | notices when a manifest changes |
+
+To dismiss a secret-detector false positive, add `# noqa: secret` on the same
+line, or name the file `*.env.example`.
+
 ## Files kaizen creates
 
 ```

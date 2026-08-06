@@ -45,6 +45,7 @@ look arbitrary are deliberate.
 | Phase 3 | Workspace detection + `project_name` | Real project reports `backend-node,frontend,typescript`; 2 monorepo fixtures |
 | Phase 4 | `/kaizen:analyze` verifies from the catalog | **Live: 13 assertions passed.** Reported by rule id with rationale + source, kept the three populations apart, honoured excludes (`.d.ts` and `scripts/`), and printed the check notes |
 | Phase 4 | Depth-agnostic check globs | 38 globs fixed; TS-004 went from 36 false violations to 0 on a real monorepo |
+| Phase 5 | Three active hooks + security baseline | 121 safety checks incl. an 18-command must-NOT-block table; every hook exercised with and without `jq` and with malformed payloads |
 
 ## Verified against a real project (2026-08-06)
 
@@ -128,6 +129,14 @@ for inspection with `KZ_LIVE_KEEP=1`. A session that cannot complete exits **3
    Either find the source or accept them explicitly as kaizen's own opinions —
    but they should not stay ambiguous.
 
+## Not verified live in phase 5
+
+The three hooks are exercised directly by the harness (121 checks), but **no live
+Claude Code session has run with `hooks.json` active**. What that would catch:
+whether `SessionStart` output actually lands as context, whether a `PreToolUse`
+exit 2 surfaces the stderr message usefully, and whether the `Stop` suggestion
+reads well in place. Worth one session before this ships.
+
 ## Known gaps the harness reports on every run
 
 These are warnings, not failures — deliberate, and visible on purpose:
@@ -145,8 +154,8 @@ These are warnings, not failures — deliberate, and visible on purpose:
 |---|---|---|
 | ✓ done | Standards catalog with provenance | Templates are renderers over versioned rule data |
 | ✓ done | `/kaizen:analyze` reads the catalog | Reports by rule id over three populations, with provenance and a standards-status section |
-| ← now | Three hooks + asserted security baseline | `Stop`, `PreToolUse`, `SessionStart`; delete the other 26 stubs |
-| | `/kaizen:doctor` | Claude Code version compatibility |
+| ✓ done | Three hooks + asserted security baseline | Implemented, wired, 121 checks; 26 stubs deleted |
+| ← now | `/kaizen:doctor` | Claude Code version compatibility: the other half of "breaks nothing" |
 | | Monorepo shape, `kaizen.config.json`, go/rust presets | |
 
 ## Working agreements for this project

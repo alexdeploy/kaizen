@@ -1,244 +1,37 @@
 {
-  "_comment": "kaizen :: hooks.json EXAMPLE. Reference file showing how to wire every Claude Code hook event to the matching script in scripts/. The actual hooks.json is intentionally absent — kaizen does NOT register any hooks by default in v0.10 (all stubs are no-ops). To activate a hook: implement the script, then copy its entry from this example into a real hooks.json next to this file.",
+  "_comment": "kaizen :: reference wiring for the hooks kaizen actually implements. The real hooks.json next to this file is what ships and is active. This example exists to show the shape; the 26 no-op stubs it used to document were deleted in phase 5 \u2014 shipping no-ops to users as if they were features is how a plugin loses trust. Intended behaviour for the unimplemented events is tracked in TODO.md, not in shipped code.",
   "_docs": "https://code.claude.com/docs/en/hooks",
-
   "hooks": {
     "SessionStart": [
       {
         "matcher": "startup",
         "hooks": [
-          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/session-start.sh" }
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/session-start.sh"
+          }
         ]
       }
     ],
-
-    "SessionEnd": [
-      {
-        "hooks": [
-          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/session-end.sh" }
-        ]
-      }
-    ],
-
-    "Setup": [
-      {
-        "hooks": [
-          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/setup.sh" }
-        ]
-      }
-    ],
-
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/user-prompt-submit.sh" }
-        ]
-      }
-    ],
-
-    "UserPromptExpansion": [
-      {
-        "hooks": [
-          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/user-prompt-expansion.sh" }
-        ]
-      }
-    ],
-
     "Stop": [
       {
         "matcher": "*",
         "hooks": [
-          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/stop.sh" }
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/stop.sh"
+          }
         ]
       }
     ],
-
-    "StopFailure": [
-      {
-        "hooks": [
-          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/stop-failure.sh" }
-        ]
-      }
-    ],
-
-    "PostToolBatch": [
-      {
-        "hooks": [
-          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/post-tool-batch.sh" }
-        ]
-      }
-    ],
-
     "PreToolUse": [
       {
         "matcher": "Bash",
         "hooks": [
-          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/pre-tool-use.sh" }
-        ]
-      }
-    ],
-
-    "PostToolUse": [
-      {
-        "matcher": "Edit|Write",
-        "hooks": [
-          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/post-tool-use.sh" }
-        ]
-      }
-    ],
-
-    "PostToolUseFailure": [
-      {
-        "hooks": [
-          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/post-tool-use-failure.sh" }
-        ]
-      }
-    ],
-
-    "PermissionRequest": [
-      {
-        "hooks": [
-          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/permission-request.sh" }
-        ]
-      }
-    ],
-
-    "PermissionDenied": [
-      {
-        "hooks": [
-          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/permission-denied.sh" }
-        ]
-      }
-    ],
-
-    "SubagentStart": [
-      {
-        "matcher": "*",
-        "hooks": [
-          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/subagent-start.sh" }
-        ]
-      }
-    ],
-
-    "SubagentStop": [
-      {
-        "matcher": "*",
-        "hooks": [
-          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/subagent-stop.sh" }
-        ]
-      }
-    ],
-
-    "TaskCreated": [
-      {
-        "hooks": [
-          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/task-created.sh" }
-        ]
-      }
-    ],
-
-    "TaskCompleted": [
-      {
-        "hooks": [
-          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/task-completed.sh" }
-        ]
-      }
-    ],
-
-    "TeammateIdle": [
-      {
-        "hooks": [
-          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/teammate-idle.sh" }
-        ]
-      }
-    ],
-
-    "InstructionsLoaded": [
-      {
-        "hooks": [
-          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/instructions-loaded.sh" }
-        ]
-      }
-    ],
-
-    "ConfigChange": [
-      {
-        "hooks": [
-          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/config-change.sh" }
-        ]
-      }
-    ],
-
-    "CwdChanged": [
-      {
-        "hooks": [
-          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/cwd-changed.sh" }
-        ]
-      }
-    ],
-
-    "FileChanged": [
-      {
-        "hooks": [
-          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/file-changed.sh" }
-        ]
-      }
-    ],
-
-    "PreCompact": [
-      {
-        "matcher": "auto",
-        "hooks": [
-          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/pre-compact.sh" }
-        ]
-      }
-    ],
-
-    "PostCompact": [
-      {
-        "hooks": [
-          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/post-compact.sh" }
-        ]
-      }
-    ],
-
-    "Notification": [
-      {
-        "matcher": "permission_prompt",
-        "hooks": [
-          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/notification.sh" }
-        ]
-      }
-    ],
-
-    "Elicitation": [
-      {
-        "hooks": [
-          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/elicitation.sh" }
-        ]
-      }
-    ],
-
-    "ElicitationResult": [
-      {
-        "hooks": [
-          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/elicitation-result.sh" }
-        ]
-      }
-    ],
-
-    "WorktreeCreate": [
-      {
-        "hooks": [
-          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/worktree-create.sh" }
-        ]
-      }
-    ],
-
-    "WorktreeRemove": [
-      {
-        "hooks": [
-          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/worktree-remove.sh" }
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/pre-tool-use.sh"
+          }
         ]
       }
     ]

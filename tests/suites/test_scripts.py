@@ -72,10 +72,33 @@ def run(r):
             )
 
         if "python" not in (text.splitlines()[0] if text else ""):
-            r.check_warn(
-                "set -euo pipefail" in text,
-                "%s sets strict mode" % label,
-            )
+            # Hooks are the exception, and deliberately so: they branch on
+            # commands that return non-zero (a `grep` that finds nothing), so
+            # `set -e` would abort them mid-way and silently stop them doing
+            # their job. `set -uo pipefail` is correct there.
+            if os.sep + "hooks" + os.sep in path:
+                # Comments are stripped first: several of these scripts explain
+                # in prose why `set -e` is absent, and the check was matching
+                # its own justification.
+                code = "\n".join(
+                    line for line in text.splitlines()
+                    if not line.lstrip().startswith("#")
+                )
+                r.check(
+                    "set -e" not in code.replace("set -euo", "SENTINEL"),
+                    "%s does not use `set -e` (hooks branch on non-zero)" % label,
+                    "a hook that aborts on the first non-matching grep stops "
+                    "working without telling anyone",
+                )
+                r.check_warn(
+                    "set -uo pipefail" in text,
+                    "%s sets the hook-appropriate strict mode" % label,
+                )
+            else:
+                r.check_warn(
+                    "set -euo pipefail" in text,
+                    "%s sets strict mode" % label,
+                )
 
         if has_shellcheck and "python" not in (text.splitlines()[0] if text else ""):
             proc = subprocess.run(

@@ -10,6 +10,55 @@ While v0.x, **minor versions may include breaking changes**. From v1.0.0 onward,
 
 ## [Unreleased]
 
+### Added — three working hooks, and a security baseline the harness asserts
+
+Phase 5. kaizen shipped **thirty** hook scripts, every one a no-op `exit 0`, with
+no `hooks.json` — so nothing kaizen did happened unless you typed it, and the
+stubs were shipped to users as if they were features. Decision record:
+[ADR-0009](./docs/decisions/0009-three-hooks-on-by-default.md).
+
+- **`PreToolUse` (Bash) — a safety net.** Blocks `rm -rf /` · `rm -rf ~` ·
+  `curl … | sh` · `chmod -R 777 /` · `git clean -x`, and warns without blocking on
+  force-push without `--force-with-lease`, `git reset --hard`, and `npm publish`.
+  The bar is explicit: a pattern belongs there only if **no legitimate command
+  could ever match it**. `rm -rf node_modules` and `rm -rf dist` run normally.
+  `KAIZEN_SAFETY=off` disables it.
+- **`SessionStart` — an oriented start.** Injects branch, dirty count, last
+  pre-merge verdict (flagged stale if source changed since), pending `/learn`
+  proposals, and standards drift between the lock and the installed catalog.
+  Silent when there is nothing to say.
+- **`Stop` — one nudge.** Suggests `/kaizen:finish` when source files changed and
+  no check has run since. Once per session, keyed by session id in the temp dir —
+  it writes nothing into the project. `KAIZEN_NUDGE=off` disables it.
+- **The other 26 stubs are deleted.** Intent for those events stays in
+  [TODO.md](./TODO.md), which is where unimplemented plans belong.
+- **Security baseline in the generated `settings.json`**: secrets unreadable
+  (`.env`, `secrets/`, `*.pem`, `id_rsa*`, `.ssh/`, `.aws/`), catastrophic deletes
+  and `sudo` denied, `git push` / `reset --hard` / `rebase` behind `ask`.
+- **`tests/suites/test_safety.py` — 121 checks**, of which the must-NOT-block
+  table is the important half. A false positive is the highest-severity bug this
+  hook can have, because a safety net that fires on real work gets switched off.
+
+### Fixed — the hooks kaizen writes into user projects were broken in two ways
+
+Found by running them, not by reading them.
+
+- **`Bash(rm -rf *)` was in the deny list.** It blocked `rm -rf node_modules`. An
+  over-broad deny rule gets the whole list deleted by the first person it annoys.
+  Replaced with anchored patterns.
+- **Four hooks used `jq` without checking for it, under `set -e`.** On a machine
+  without `jq` they errored on **every edit**. All six template hooks now read
+  their payload through a `payload_field` helper (jq → python3 → sed) and drop
+  `set -e`, which was wrong anyway: these scripts branch on commands that
+  legitimately return non-zero.
+- **The secret detector silently scanned nothing without `jq`.** Its content read
+  was a compound `jq` expression, so a missing `jq` yielded an empty string and
+  every write was approved. A security hook that silently does nothing is worse
+  than none.
+- **The private-key pattern never matched a real private key.** It required
+  `-----BEGIN RSA KEY-----`; every tool emits `-----BEGIN RSA PRIVATE KEY-----`.
+  All five real header forms now block.
+
 ### Added — live behaviour evals for `/kaizen:upgrade` and `/kaizen:analyze`
 
 Both skills had been written and structurally checked but never executed. They

@@ -53,3 +53,4 @@ knowing what it costs.
 | [0006](./0006-python-for-structured-runtime-scripts.md) | Runtime scripts may be Python 3 when the job is structured data | accepted |
 | [0007](./0007-monorepo-is-a-shape.md) | A monorepo is a shape, not a preset | accepted |
 | [0008](./0008-analyze-reports-by-rule-id.md) | `/kaizen:analyze` reports by rule id, over three populations | accepted |
+| [0009](./0009-three-hooks-on-by-default.md) | Three hooks, on by default; delete the other twenty-six | accepted |

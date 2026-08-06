@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Hook: SessionStart — injects fresh repo state into Claude's initial context.
-set -euo pipefail
+# A hook must never fail the user's session: no `set -e`.
+set -uo pipefail
 cd "${CLAUDE_PROJECT_DIR:-.}"
 
 echo "## Repo state at session start"
