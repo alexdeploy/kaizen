@@ -1,0 +1,6 @@
+{
+  "name": "acme-suite",
+  "private": true,
+  "scripts": { "lint": "pnpm -r lint", "test": "pnpm --filter ./backend test" },
+  "devDependencies": { "husky": "^9.1.0" }
+}

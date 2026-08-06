@@ -51,3 +51,4 @@ knowing what it costs.
 | [0004](./0004-upgrade-replaces-force.md) | `/kaizen:upgrade` replaces `--force` | accepted |
 | [0005](./0005-standards-as-versioned-data.md) | Standards are versioned data with provenance, not prose in templates | accepted |
 | [0006](./0006-python-for-structured-runtime-scripts.md) | Runtime scripts may be Python 3 when the job is structured data | accepted |
+| [0007](./0007-monorepo-is-a-shape.md) | A monorepo is a shape, not a preset | accepted |

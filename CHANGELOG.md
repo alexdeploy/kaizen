@@ -10,6 +10,47 @@ While v0.x, **minor versions may include breaking changes**. From v1.0.0 onward,
 
 ## [Unreleased]
 
+### Fixed — workspace/monorepo detection (branch `next`)
+
+Found by running `/kaizen:init` against a real 132-file pnpm workspace.
+`kaizen-detect` read only the **root** `package.json`, where a monorepo keeps
+scripts and tooling but no framework or language dependency — so a TypeScript
+monorepo reported `stack: "javascript"`. After the standards catalog that stopped
+being cosmetic: detection filters which rules a project receives, and `TS-003`
+(`No any`) applies to `typescript` only, so a 132-file TypeScript codebase was
+silently getting no rule about `any`.
+
+Decision record: [ADR-0007](./docs/decisions/0007-monorepo-is-a-shape.md) — a
+monorepo is a **shape**, orthogonal to stack, not a new preset or stack token.
+
+- **`kaizen-detect` scans workspace members**, not just the root. New output
+  fields:
+  - `workspaces`: `{ type, packages, count }` where `type` is `pnpm` | `npm` |
+    `lerna` | `turbo` | `nx` | `cargo` | `go` | `none`, resolved from
+    `pnpm-workspace.yaml`, `workspaces` in `package.json`, or `lerna.json`, with
+    globs expanded to directories that actually hold a manifest.
+  - `project_name`: the manifest's own `name`, falling back to `basename(cwd)`.
+    The directory is whatever the user cloned into.
+  - A member declaring TypeScript now makes the whole project TypeScript.
+  - Frontend detection also recognises `@quasar/*` and `solid-js`; backend
+    detection recognises `@nestjs/core`.
+- **`/kaizen:init` uses the shape.** `architecture_layout` walks
+  `<package>/src/*/` for each workspace member instead of assuming a root `src/`
+  (which produced a false "No src/ directory detected"). `{{PROJECT_NAME}}` now
+  comes from `detect.project_name` rather than being re-derived.
+- **Two new conditionals**: `no_format` removes a `Format:` line the root
+  manifest cannot run — a dead command in the first section Claude reads every
+  session — and `workspace_scripts` annotates commands that only exist in a
+  member instead of inventing a root script.
+- **Two new fixtures** — `monorepo-pnpm` (mirrors the real project: root
+  manifest with no dependencies at all, plus a `frontend/plugins/*` glob to
+  expand) and `monorepo-npm` (workspace array inside `package.json`, needing
+  real JSON parsing). All six existing goldens were updated for the new schema,
+  which the harness demanded loudly — schema changes are now visibly expensive.
+- `kaizen-detect` calls `python3` for JSON reads that a line grep cannot do, and
+  falls back to grep; a missing `python3` degrades to today's behaviour (no
+  workspaces detected) rather than to a wrong answer.
+
 ### Added — standards catalog with provenance (branch `next`)
 
 Phase 2 of [ROADMAP.md](./ROADMAP.md). Conventions move out of template prose

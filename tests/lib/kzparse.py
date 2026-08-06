@@ -207,3 +207,24 @@ def _section(text, heading):
 def config(name):
     """Load a JSON config file from tests/config/."""
     return read_json(os.path.join(CONFIG_DIR, name))
+
+
+def detect_stack_tokens():
+    """Every stack token kaizen-detect can emit.
+
+    Single source of truth for the suites that check stack coverage (templates,
+    standards). Tokens reach the output two ways: appended to the `stacks` array
+    for whole-project signals, and echoed by `scan_manifest` for per-manifest
+    ones — a workspace scans several manifests, so those cannot use the array.
+    """
+    text = read(DETECT_BIN)
+    tokens = set(re.findall(r'stacks\+=\("([a-z-]+)"\)', text))
+
+    # Only echoes inside scan_manifest are stack tokens; the other helpers echo
+    # package managers, maturity levels and CI providers.
+    match = re.search(r"^scan_manifest\(\).*?^}", text, re.MULTILINE | re.DOTALL)
+    if match:
+        tokens |= set(re.findall(r'echo "([a-z][a-z-]*)"', match.group(0)))
+
+    tokens.add("generic")
+    return tokens

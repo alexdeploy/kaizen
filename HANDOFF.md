@@ -68,32 +68,32 @@ original — always `rsync` to a temp dir first.
 
 **Bugs found — see "Not yet verified / open bugs" below.**
 
-## Open bugs found by the real-project run
+## Bugs found by the real-project run — all six fixed (phase 3)
 
-1. **`kaizen-detect` only reads the ROOT `package.json`.** In a pnpm workspace
-   the dependencies live in `frontend/` and `backend/`, so a TypeScript monorepo
-   is detected as `stack: "javascript"` with no `frontend` or `backend-node`
-   token. Consequence is concrete: **TS-003 (`No any`) applies only to
-   `typescript` and is silently not rendered** — a 132-file TypeScript project
-   gets no rule about `any`. Highest-value fix available.
-2. **No workspace/monorepo detection at all.** `pnpm-workspace.yaml`,
-   `workspaces` in `package.json`, `turbo.json`, `nx.json` are all ignored.
-   Monorepo is a *shape*, orthogonal to stack — it changes where config goes,
-   not what it says.
-3. **`architecture_layout` globs `src/*/` only.** A monorepo has no root `src/`,
-   so the literal directive would write "No src/ directory detected", which is
-   false. The model worked around it and said so; the directive is still wrong.
-4. **`{{PROJECT_NAME}}` is `basename(cwd)`.** Wrong whenever the directory name
-   is not the project name. Should prefer `package.json` `name` and fall back to
-   the basename.
-5. **No `no_format` conditional.** The generated CLAUDE.md advertises
-   `Format: pnpm run format` in a repo with no root `format` script — a dead
-   command in the first section Claude reads every session.
-6. **Live evals need `bypassPermissions`.** `acceptEdits` refuses writes under
-   `.claude/**`, so a live run produces `CLAUDE.md` and nothing else and looks
-   like a product failure. Fixed in `tests/live/run-live.sh`.
+Fixed in the workspace-detection commit; see
+[ADR-0007](./docs/decisions/0007-monorepo-is-a-shape.md).
+
+| # | Bug | Fix | Verified |
+|---|---|---|---|
+| 1 | `kaizen-detect` read only the ROOT `package.json`, so a TypeScript monorepo detected as `javascript` and silently lost `TS-003` | Scans every workspace member; a member with TypeScript makes the project TypeScript | Real project now reports `backend-node,frontend,typescript`; `TS-003` renders |
+| 2 | No workspace detection at all | `workspaces: {type, packages, count}` in the fingerprint | 2 new fixtures with goldens |
+| 3 | `architecture_layout` globbed `src/*/` only | Walks `<package>/src/*/` per member when a workspace is detected | **Static only — needs a live run** |
+| 4 | `{{PROJECT_NAME}}` was `basename(cwd)` | Comes from `detect.project_name` (manifest name) | Fixture goldens |
+| 5 | No `no_format` conditional → dead `Format:` command | `no_format` + `workspace_scripts` conditionals added | **Static only — needs a live run** |
+| 6 | Live evals used `acceptEdits`, which refuses writes under `.claude/**` | Default is now `bypassPermissions` | Was the harness that was wrong, not the plugin |
 
 ## Not yet verified — pick these up first
+
+0. **The phase-3 fixes have no live run.** `kaizen-detect` is verified
+   deterministically (the real project, 2 new fixtures, 41 detect checks), but
+   the three changes that live in `init/SKILL.md` — per-package
+   `architecture_layout`, `no_format`, `workspace_scripts` — depend on the model
+   following new instructions and have only been checked statically. The live
+   re-run hit the account's session limit (resets 13:20). Rerun:
+   `rsync -a --exclude node_modules <real-project>/ /tmp/x/ && cd /tmp/x && rm -rf .claude CLAUDE.md`
+   then `claude -p "/kaizen:init --profile=standard" --plugin-dir <plugin> --permission-mode bypassPermissions`
+   and check: no leftover markers, `Project: **<manifest name>**`, per-package
+   architecture bullets, no `Format:` line.
 
 1. **`/kaizen:upgrade` as a skill has never run** (the `kaizen-lock` engine
    underneath it now has, on real content). The riskiest part is step 3

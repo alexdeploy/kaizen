@@ -48,7 +48,7 @@ These are the ONLY placeholders you substitute. Be exact — wrong values are bu
 
 | Placeholder | Source | Example |
 |---|---|---|
-| `{{PROJECT_NAME}}` | `basename(cwd)` | `quasar-project` |
+| `{{PROJECT_NAME}}` | `detect.project_name` — the manifest's own `name`, falling back to `basename(cwd)`. Never re-derive it: the directory is whatever the user cloned into. | `slabiq` |
 | `{{STACK_RAW}}` | `detect.stack` field, raw CSV | `typescript,frontend` |
 | `{{STACK_FRIENDLY}}` | Human-readable name YOU derive from `STACK_RAW` + `package.json`. **Conservative**: use detected framework names; do not invent. | `TypeScript / Vue 3 / Quasar` |
 | `{{PACKAGE_MANAGER}}` | `detect.package_manager` | `npm` |
@@ -220,11 +220,30 @@ Examples:
 
 **Location**: inside `## Architecture (brief)` section of `CLAUDE.md`.
 
-**Action**: Use the Glob tool with pattern `src/*/`. For each direct child directory of `src/`, append a bullet:
+**Action**: depends on whether this is a workspace.
+
+**Single-package project** (`detect.workspaces.type == "none"`) — Glob `src/*/`.
+For each direct child directory of `src/`, append a bullet:
 
 ```
 - `src/<dir>/` — <inferred purpose>
 ```
+
+**Workspace** (`detect.workspaces.type != "none"`) — a monorepo usually has no
+root `src/`, and globbing for one would write "No src/ directory detected",
+which is false. Instead, for **each** package in `detect.workspaces.packages`,
+glob `<package>/src/*/` and emit its children under a package heading:
+
+```
+- `<package>/` — <package name from its manifest>
+  - `<package>/src/<dir>/` — <inferred purpose>
+```
+
+Cap the total at 20 bullets across all packages; if there are more, list the
+largest packages first and end with `- ... (and N more)`. If a package has no
+`src/`, glob its direct children instead and mark it `(no src/ — flat layout)`.
+
+The purpose lookup table below applies the same way in both modes.
 
 Inferred purpose comes from the directory name. Use this table; if the name isn't here, write `(purpose: TBD)`.
 
@@ -278,6 +297,8 @@ These are the ONLY content removals you may perform beyond substitution and enri
 | `no_build` | No `build` script in `package.json` | In CLAUDE.md `## Commands`, remove the `Build: ...` line. |
 | `no_package_manager` | `PACKAGE_MANAGER == "none"` | In CLAUDE.md `## Commands`, replace all `{{PACKAGE_MANAGER}}`-prefixed lines with: `<!-- No package manager detected. Add commands here once one is chosen. -->` |
 | `dev_script_present` | Project has `dev` script but template has no `Dev:` line | In CLAUDE.md `## Commands`, insert `Dev: {{PACKAGE_MANAGER}} run dev` after `Install`. |
+| `no_format` | No `format` script in the **root** manifest | In CLAUDE.md `## Commands`, remove the `Format: ...` line. A command that does not exist is worse than a missing one: it is in the first section Claude reads every session. |
+| `workspace_scripts` | `detect.workspaces.type != "none"` AND a command's script is missing from the root manifest but present in a member | Keep the line, and append ` (run per package: <pm> --filter <pkg> <script>)`. Report which member you took it from. Do **not** invent a root script that does not exist. |
 
 **No other removals or insertions are allowed.** If you want to add framework-specific content (e.g., Vue Test Utils to testing.md), report it as a **suggestion** (see the Suggestions section below) — do not auto-apply. Framework overlays are planned for v0.3.
 

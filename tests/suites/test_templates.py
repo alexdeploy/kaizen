@@ -96,7 +96,7 @@ def run(r):
 
     # --- every stack the detector emits maps to a real preset -------------
     mapping = P.config("stack-presets.json")["stack_to_preset"]
-    emitted = _stacks_kaizen_detect_can_emit()
+    emitted = P.detect_stack_tokens()
 
     for stack in sorted(emitted):
         if not r.check(
@@ -122,11 +122,3 @@ def run(r):
         )
 
 
-def _stacks_kaizen_detect_can_emit():
-    """Every literal pushed onto the stacks array in kaizen-detect."""
-    import re
-
-    text = P.read(P.DETECT_BIN)
-    stacks = set(re.findall(r'stacks\+=\("([a-z-]+)"\)', text))
-    stacks.add("generic")  # the explicit empty-case fallback
-    return stacks

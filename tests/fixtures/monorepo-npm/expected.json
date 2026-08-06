@@ -1,0 +1,15 @@
+{
+  "project_name": "npm-mono",
+  "stack": "backend-node,frontend,javascript",
+  "package_manager": "npm",
+  "maturity": "scaffold",
+  "workspaces": {
+    "type": "npm",
+    "packages": ["packages/api", "packages/web"],
+    "count": 2
+  },
+  "git": { "is_repo": false, "commits": 0, "branch": "none" },
+  "existing_claude_config": "",
+  "tests_found": 0,
+  "ci": "none"
+}

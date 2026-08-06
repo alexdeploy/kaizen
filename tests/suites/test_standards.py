@@ -114,7 +114,7 @@ def _check_rules(r, index, rules):
     severities = set(index.get("severity_levels", {}))
     statuses = set(index.get("status_values", []))
     check_types = set(index.get("check_types", {}))
-    known_stacks = _detect_stack_tokens()
+    known_stacks = P.detect_stack_tokens()
 
     used_surfaces = set()
     sourceless = []
@@ -376,8 +376,3 @@ def _json_run(r, args):
         return None
 
 
-def _detect_stack_tokens():
-    text = P.read(P.DETECT_BIN)
-    tokens = set(re.findall(r'stacks\+=\("([a-z-]+)"\)', text))
-    tokens.add("generic")
-    return tokens

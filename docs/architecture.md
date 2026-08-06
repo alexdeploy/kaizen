@@ -196,9 +196,15 @@ CLAUDE.md
 
 ```json
 {
+  "project_name": "my-app",
   "stack": "typescript,frontend",
   "package_manager": "pnpm",
   "maturity": "small",
+  "workspaces": {
+    "type": "pnpm",
+    "packages": ["backend", "frontend"],
+    "count": 2
+  },
   "git": {
     "is_repo": true,
     "commits": 47,
@@ -213,7 +219,11 @@ CLAUDE.md
 
 | Field | Type | Possible values |
 |---|---|---|
-| `stack` | string (CSV) | `generic` \| `typescript` \| `javascript` \| `python` \| `go` \| `rust` \| `java` \| `ruby` \| `php` \| `elixir` (optionally `+frontend`, `+backend-node`) |
+| `project_name` | string | The manifest's own `name`; falls back to `basename(cwd)`. Never the directory name when a manifest exists — see [ADR-0007](./decisions/0007-monorepo-is-a-shape.md) |
+| `workspaces.type` | string | `pnpm` \| `npm` \| `lerna` \| `turbo` \| `nx` \| `cargo` \| `go` \| `none` |
+| `workspaces.packages` | string[] | Workspace globs expanded to directories holding a manifest, sorted |
+| `workspaces.count` | int | Length of `packages` |
+| `stack` | string (CSV) — scanned from the root manifest **and every workspace member** | `generic` \| `typescript` \| `javascript` \| `python` \| `go` \| `rust` \| `java` \| `ruby` \| `php` \| `elixir` (optionally `+frontend`, `+backend-node`) |
 | `package_manager` | string | `pnpm` \| `yarn` \| `bun` \| `npm` \| `uv` \| `poetry` \| `pipenv` \| `pip` \| `none` |
 | `maturity` | string | `empty` (0 src files) \| `scaffold` (1-5) \| `small` (6-50) \| `mature` (50+) |
 | `git.is_repo` | bool | true / false |

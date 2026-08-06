@@ -1,0 +1,15 @@
+{
+  "project_name": "acme-suite",
+  "stack": "backend-node,frontend,typescript",
+  "package_manager": "pnpm",
+  "maturity": "scaffold",
+  "workspaces": {
+    "type": "pnpm",
+    "packages": ["backend", "frontend", "frontend/plugins/native-bridge"],
+    "count": 3
+  },
+  "git": { "is_repo": false, "commits": 0, "branch": "none" },
+  "existing_claude_config": "",
+  "tests_found": 0,
+  "ci": "none"
+}

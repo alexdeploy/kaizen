@@ -1,0 +1,3 @@
+{
+  "_comment": "npm/yarn/bun style: the workspace list is an array inside package.json, which needs real JSON parsing rather than a line grep. No TypeScript anywhere, so this also pins that `javascript` survives when no member declares TS."
+}
