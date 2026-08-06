@@ -129,13 +129,36 @@ for inspection with `KZ_LIVE_KEEP=1`. A session that cannot complete exits **3
    Either find the source or accept them explicitly as kaizen's own opinions —
    but they should not stay ambiguous.
 
-## Not verified live in phase 5
+## The hooks, live (2026-08-06)
 
-The three hooks are exercised directly by the harness (121 checks), but **no live
-Claude Code session has run with `hooks.json` active**. What that would catch:
-whether `SessionStart` output actually lands as context, whether a `PreToolUse`
-exit 2 surfaces the stderr message usefully, and whether the `Stop` suggestion
-reads well in place. Worth one session before this ships.
+Run in a temp repo with **no `.claude/` directory at all**, so all three hooks
+came from the plugin and nothing else. Branch `feature/oauth`, three uncommitted
+files, no prior verdict.
+
+- **`SessionStart` lands as context.** Asked to answer without running any tool,
+  Claude replied "branch `feature/oauth` with 3 uncommitted files". The injection
+  works and is used.
+- **`PreToolUse` blocks usefully.** Asked to clean the tree with
+  `git clean -fdx`, Claude was blocked, read the stderr explanation, and — worth
+  quoting — *"I'm not going to switch off a safety guard on my own."* It then
+  enumerated what would have been lost (`src/b.ts`, unrecoverable), noted no
+  `.env` was present so the hook's specific worry did not apply here, and offered
+  `git clean -fdX` and an `-e` exclusion as narrower alternatives. It behaved as
+  a safety net, not an obstacle.
+- **`Stop` fired.** A marker appeared in the temp dir for each session, keyed by
+  the real session UUID, which proves the hook ran, parsed `session_id`, and
+  decided to suggest.
+
+**Not observable headlessly, and therefore still unverified:** whether the `Stop`
+suggestion is *seen*. Its stdout does not appear in `claude -p` output — in
+headless mode there is no following turn for it to be injected into, and no human
+to nudge. Whether it reads well in an interactive session needs a human running
+`claude` normally in a dirty repo. Everything about the hook's *decision* is
+verified; its *presentation* is not.
+
+One incidental note: in the first session Claude answered the blocked-command
+half of the prompt and skipped the context question entirely. That is model
+prioritisation, not a hook failure — the isolated re-run answered it correctly.
 
 ## Known gaps the harness reports on every run
 
