@@ -11,9 +11,21 @@
       "added": "2026-08-05",
       "severity": "safety",
       "status": "active",
-      "applies_to": { "stack": ["*"], "maturity": ["scaffold", "small", "mature"] },
+      "applies_to": {
+        "stack": [
+          "*"
+        ],
+        "maturity": [
+          "scaffold",
+          "small",
+          "mature"
+        ]
+      },
       "surface": "claude_md.never",
-      "check": { "type": "none", "reason": "requires branch protection state, not file content" }
+      "check": {
+        "type": "none",
+        "reason": "requires branch protection state, not file content"
+      }
     },
     {
       "id": "UNI-002",
@@ -24,9 +36,20 @@
       "added": "2026-08-05",
       "severity": "security",
       "status": "active",
-      "applies_to": { "stack": ["*"], "maturity": ["small", "mature"] },
+      "applies_to": {
+        "stack": [
+          "*"
+        ],
+        "maturity": [
+          "small",
+          "mature"
+        ]
+      },
       "surface": "claude_md.never",
-      "check": { "type": "none", "reason": "justification is prose in a PR, not a file pattern" }
+      "check": {
+        "type": "none",
+        "reason": "justification is prose in a PR, not a file pattern"
+      }
     },
     {
       "id": "UNI-003",
@@ -37,9 +60,21 @@
       "added": "2026-08-05",
       "severity": "safety",
       "status": "active",
-      "applies_to": { "stack": ["*"], "maturity": ["scaffold", "small", "mature"] },
+      "applies_to": {
+        "stack": [
+          "*"
+        ],
+        "maturity": [
+          "scaffold",
+          "small",
+          "mature"
+        ]
+      },
       "surface": "claude_md.never",
-      "check": { "type": "none", "reason": "requires diff history, not a static pattern" }
+      "check": {
+        "type": "none",
+        "reason": "requires diff history, not a static pattern"
+      }
     },
     {
       "id": "UNI-004",
@@ -50,9 +85,20 @@
       "added": "2026-08-05",
       "severity": "convention",
       "status": "active",
-      "applies_to": { "stack": ["*"], "maturity": ["small", "mature"] },
+      "applies_to": {
+        "stack": [
+          "*"
+        ],
+        "maturity": [
+          "small",
+          "mature"
+        ]
+      },
       "surface": "claude_md.conventions",
-      "check": { "type": "none", "reason": "stack-specific; see TS-005 and PY-006" }
+      "check": {
+        "type": "none",
+        "reason": "stack-specific; see TS-005 and PY-006"
+      }
     },
     {
       "id": "UNI-005",
@@ -63,9 +109,21 @@
       "added": "2026-08-05",
       "severity": "safety",
       "status": "active",
-      "applies_to": { "stack": ["*"], "maturity": ["scaffold", "small", "mature"] },
+      "applies_to": {
+        "stack": [
+          "*"
+        ],
+        "maturity": [
+          "scaffold",
+          "small",
+          "mature"
+        ]
+      },
       "surface": "rules_testing.conventions",
-      "check": { "type": "none", "reason": "detectable only by running the suite shuffled" }
+      "check": {
+        "type": "none",
+        "reason": "detectable only by running the suite shuffled"
+      }
     },
     {
       "id": "UNI-006",
@@ -76,9 +134,20 @@
       "added": "2026-08-05",
       "severity": "convention",
       "status": "active",
-      "applies_to": { "stack": ["*"], "maturity": ["small", "mature"] },
+      "applies_to": {
+        "stack": [
+          "*"
+        ],
+        "maturity": [
+          "small",
+          "mature"
+        ]
+      },
       "surface": "rules_testing.conventions",
-      "check": { "type": "none", "reason": "requires knowing which modules are internal" }
+      "check": {
+        "type": "none",
+        "reason": "requires knowing which modules are internal"
+      }
     }
   ]
 }

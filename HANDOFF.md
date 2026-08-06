@@ -42,6 +42,9 @@ look arbitrary are deliberate.
 | Phase 2 | Standards catalog — 31 rules, `universal` / `typescript` / `python` | 873 harness checks: schema, provenance, ripgrep-compatible patterns, template↔index surface agreement |
 | Phase 2 | `bin/kaizen-standards` (version/list/show/render/checks) | Exercised directly; render verified deterministic and refinement suppression working |
 | Phase 2 | Templates converted to renderers (10 markers across 5 files) | Harness (both directions) + **a live run: 8 rules rendered with ids, no leftover markers** |
+| Phase 3 | Workspace detection + `project_name` | Real project reports `backend-node,frontend,typescript`; 2 monorepo fixtures |
+| Phase 4 | `/kaizen:analyze` verifies from the catalog | 963 standards checks incl. "no catalog pattern inlined in the skill"; checks run by hand against real code |
+| Phase 4 | Depth-agnostic check globs | 38 globs fixed; TS-004 went from 36 false violations to 0 on a real monorepo |
 
 ## Verified against a real project (2026-08-06)
 
@@ -95,19 +98,25 @@ Fixed in the workspace-detection commit; see
    and check: no leftover markers, `Project: **<manifest name>**`, per-package
    architecture bullets, no `Format:` line.
 
-1. **`/kaizen:upgrade` as a skill has never run** (the `kaizen-lock` engine
+1. **`/kaizen:analyze` has never run as a skill.** Its checks were verified by
+   running the catalog's patterns by hand against real code (TS-004: 36 hits
+   without excludes, 0 with; TS-003: 1 hit, a comment false positive). What is
+   unverified is the model following the three-population classification and
+   producing the report shape. Needs a live eval on a project with a generated
+   `CLAUDE.md` plus one hand-written convention.
+2. **`/kaizen:upgrade` as a skill has never run** (the `kaizen-lock` engine
    underneath it now has, on real content). The riskiest part is step 3
    (re-rendering today's templates the way `init` would). Needs a live eval:
    init a fixture, change a template, edit a generated file as a "user", run
    upgrade, assert the user's edit survived. This is the single most important
    missing test in the project.
-2. ~~`/kaizen:init` step 7 has never run live.~~ **Done** — verified on a real
+3. ~~`/kaizen:init` step 7 has never run live.~~ **Done** — verified on a real
    monorepo 2026-08-06; the lock recorded 9 files with baselines.
-3. **`.gitignore` repair path is untested.** When an older project ignores all of
+4. **`.gitignore` repair path is untested.** When an older project ignores all of
    `.claude/kaizen/`, init/upgrade are supposed to rewrite the rule. No test.
-4. ~~No live run has ever filled a `KAIZEN_STANDARDS` marker.~~ **Done** —
+5. ~~No live run has ever filled a `KAIZEN_STANDARDS` marker.~~ **Done** —
    8 rules rendered with ids into a real project's `CLAUDE.md`, no leftovers.
-5. **17 of 31 rules have no source.** Surfaced by the harness on every run.
+6. **17 of 31 rules have no source.** Surfaced by the harness on every run.
    Either find the source or accept them explicitly as kaizen's own opinions —
    but they should not stay ambiguous.
 
@@ -127,8 +136,8 @@ These are warnings, not failures — deliberate, and visible on purpose:
 | Next | Phase | Note |
 |---|---|---|
 | ✓ done | Standards catalog with provenance | Templates are renderers over versioned rule data |
-| ← now | `/kaizen:analyze` reads the catalog | Replace the hardcoded pattern library with `kaizen-standards checks`; report rule ids and deprecations instead of fuzzy substring matches |
-| | Three hooks + asserted security baseline | Delete the other 26 stubs |
+| ✓ done | `/kaizen:analyze` reads the catalog | Reports by rule id over three populations, with provenance and a standards-status section |
+| ← now | Three hooks + asserted security baseline | `Stop`, `PreToolUse`, `SessionStart`; delete the other 26 stubs |
 | | `/kaizen:doctor` | Claude Code version compatibility |
 | | Monorepo shape, `kaizen.config.json`, go/rust presets | |
 

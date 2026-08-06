@@ -10,6 +10,47 @@ While v0.x, **minor versions may include breaking changes**. From v1.0.0 onward,
 
 ## [Unreleased]
 
+### Changed — `/kaizen:analyze` verifies rules from the catalog (branch `next`)
+
+Phase 4. `--best-practices` stops matching conventions by prose and starts
+verifying them by rule id. Decision record:
+[ADR-0008](./docs/decisions/0008-analyze-reports-by-rule-id.md).
+
+- **The hardcoded keyword table is gone.** It matched a convention's text against
+  a private pattern list by case-insensitive substring, so rewording "No default
+  exports." to "Avoid default exports." silently disabled the check, with no
+  error anywhere. Checks now come from `kaizen-standards checks`, used verbatim,
+  and a harness check fails the build if any catalog pattern reappears inside
+  `analyze/SKILL.md`.
+- **Three populations, never mixed**: catalog rules kaizen wrote (verified by
+  id), conventions the user wrote themselves (not kaizen's to judge — one exact
+  text match is attempted and reported as such), and catalog rules that apply but
+  were never adopted (a gap, never a violation).
+- **Findings carry their provenance.** Each violation reports the rule's
+  severity, id, the first sentence of its rationale, and its source link — data
+  that was already in the object being read.
+- **New `### Standards status` section**: which rules are deprecated or unknown
+  to the catalog, and which were added since the `standards_version` in the lock,
+  via the new `kaizen-standards list --added-after <version>`.
+- **`--architecture` is workspace-aware**: globs `<package>/src/*/` per member
+  instead of a root `src/` that a monorepo does not have, which previously
+  reported every documented directory as missing.
+
+### Fixed — check globs anchored to the repository root
+
+Found by running a catalog check against a real monorepo. A directory glob
+without a `**/` prefix anchors to the repository root, so `scripts/**` never
+excluded `backend/src/scripts/`: TS-004 reported **36 violations in CLI scripts
+the rule was written to ignore**. Honouring the exclude correctly gives 0. All 38
+affected globs across the catalog now carry `**/`, and the harness fails any glob
+containing `/` that does not.
+
+Also recorded honestly rather than hidden: TS-003's pattern matches prose inside
+comments (ripgrep has no comment awareness). On the same real project its single
+hit was the comment `Crude heuristic: any CJK char`. The rule now carries a
+`note` about it, and `/kaizen:analyze` is required to print a check's note
+alongside its findings.
+
 ### Fixed — workspace/monorepo detection (branch `next`)
 
 Found by running `/kaizen:init` against a real 132-file pnpm workspace.

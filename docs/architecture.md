@@ -1719,3 +1719,95 @@ deliberately: it is what lets `/kaizen:analyze` check the right rule, what lets
 - `render` is deterministic, ids are attached, refinement suppression works,
   and the empty case exits 1.
 - Rules with no source are reported (warning) rather than quietly accepted.
+
+---
+
+# 19. `/kaizen:analyze` on the catalog (unreleased — `next` branch)
+
+> Supersedes the pattern-library description in §11. Decision record:
+> [ADR-0008](./decisions/0008-analyze-reports-by-rule-id.md).
+
+## What changed
+
+`--best-practices` used to match a convention's **prose** against a keyword table
+hardcoded in `analyze/SKILL.md`. The rule and its check were separate objects
+joined by case-insensitive substring similarity, so rewording a convention
+silently disabled its verification — no error, no warning, no way to notice.
+
+Now the id in the generated line is the join key:
+
+```markdown
+- **No `any`.** Use `unknown` and narrow. <!-- TS-003 -->
+```
+
+```
+kaizen-standards checks --stack backend-node,frontend,typescript --maturity mature
+```
+
+The keyword table is deleted, and a harness check fails the build if any catalog
+pattern reappears inside the skill.
+
+## Three populations
+
+The load-bearing distinction of this mode. Mixing them turns an audit into an
+argument.
+
+```
+      every bullet under ## Conventions / ## Never do
+                          │
+      ┌───────────────────┼───────────────────────┐
+      ▼                   ▼                       ▼
+  ends with           no id comment        in the catalog for this
+  <!-- ID -->                              stack, but no line has its id
+      │                   │                       │
+      ▼                   ▼                       ▼
+  A · catalog rule    B · the user's own      C · not adopted
+  verify with its     NOT kaizen's to         a GAP, never a
+  own check; report   judge. One exact        violation. Prompts
+  id + rationale      text match tried,       /kaizen:upgrade
+  + source            then unchecked
+```
+
+## Standards status
+
+The section that makes "always up to date" answerable rather than aspirational.
+Three questions, all answered from data already on disk:
+
+| Question | Source |
+|---|---|
+| Which rules in my config are deprecated? | `kaizen-standards show <ID>` → `status`, `deprecated_by` |
+| Which ids no longer exist at all? | absent from the catalog → config predates a change, or was hand-edited |
+| Which rules exist that I never had? | `kaizen-standards list --added-after <lock standards_version>` |
+
+The third needs the lock's `standards_version`, which is why
+[ADR-0002](./decisions/0002-configuration-lock.md) had to come first. Without a
+lock, staleness cannot be computed and the report says so instead of guessing.
+
+## Provenance in findings
+
+Each violation reports severity, id, the matching line, the first sentence of the
+rule's `rationale`, and its first source link — all fields already present in the
+object being read, so the cost is formatting:
+
+```
+#### [safety] PY-008 — No bare `except:`
+`backend/src/features/scan/ocr.py:142`
+> A bare except also catches `KeyboardInterrupt` and `SystemExit`, so it makes
+> a program that cannot be stopped.
+Source: PEP 8 — Programming Recommendations · https://peps.python.org/pep-0008/…
+```
+
+## Two limitations, both surfaced rather than hidden
+
+**Globs must be depth-agnostic.** A directory glob without a `**/` prefix anchors
+to the repository root, so in a workspace `scripts/**` never excludes
+`backend/src/scripts/`. Running TS-004 against a real monorepo produced **36
+violations in CLI scripts the rule was written to ignore**; honouring the exclude
+correctly gives 0. All 38 affected globs now carry `**/`, and the harness rejects
+any glob containing `/` that does not.
+
+**Grep has no comment awareness.** TS-003's pattern matches `: any` inside prose.
+On the same real project its single hit was the comment
+`Crude heuristic: any CJK char`. The rule carries a `note` saying so, and the
+skill is required to print a check's note alongside its findings. A limitation
+shown is worth more than a clean-looking report that cannot be trusted.

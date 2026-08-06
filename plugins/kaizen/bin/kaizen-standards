@@ -5,7 +5,8 @@ Query and render the standards catalog — the versioned, sourced rules that
 /kaizen:init writes into a project's CLAUDE.md and rules files.
 
     kaizen-standards version
-    kaizen-standards list   [--stack S] [--maturity M] [--surface S] [--severity S] [--status S] [--json]
+    kaizen-standards list   [--stack S] [--maturity M] [--surface S] [--severity S]
+                            [--status S] [--added-after 2026.08] [--json]
     kaizen-standards show   <RULE-ID>
     kaizen-standards render --surface S [--stack S] [--maturity M]
     kaizen-standards checks [--stack S]            # rules that /kaizen:analyze can verify
@@ -23,6 +24,7 @@ Exit codes: 0 ok · 1 not found / empty result · 2 usage or catalog error.
 import argparse
 import json
 import os
+import re
 import sys
 
 SEVERITY_RANK = {"security": 0, "safety": 1, "convention": 2}
@@ -82,9 +84,28 @@ def load_catalog():
 # ------------------------------------------------------------- filtering ---
 
 
-def matches(rule, stacks, maturity, surface, severity, status):
+def added_month(value):
+    """`2026.08`, `2026-08` or `2026-08-05` -> `(2026, 8)`. None if unparseable."""
+    if not value:
+        return None
+    match = re.match(r"^(\d{4})[.\-](\d{2})", str(value))
+    if not match:
+        return None
+    return (int(match.group(1)), int(match.group(2)))
+
+
+def matches(rule, stacks, maturity, surface, severity, status, added_after=None):
     if status != "any" and rule.get("status") != status:
         return False
+
+    # "Newer than the standards version this project was generated against."
+    # Catalog versions are monthly, so a rule counts as new when its `added`
+    # month is strictly later than the given version's month.
+    if added_after:
+        floor = added_month(added_after)
+        rule_month = added_month(rule.get("added"))
+        if floor is None or rule_month is None or rule_month <= floor:
+            return False
     if surface and rule.get("surface") != surface:
         return False
     if severity and rule.get("severity") != severity:
@@ -115,6 +136,7 @@ def select(rules, args):
             getattr(args, "surface", None),
             getattr(args, "severity", None),
             getattr(args, "status", "active"),
+            getattr(args, "added_after", None),
         )
     ]
 
@@ -234,6 +256,11 @@ def main():
         p.add_argument("--severity", choices=["security", "safety", "convention"])
         p.add_argument("--status", default="active",
                        choices=["active", "deprecated", "any"])
+        p.add_argument(
+            "--added-after", metavar="VERSION",
+            help="only rules added in a later catalog version than this "
+                 "(e.g. 2026.08) — what a project generated then is missing",
+        )
 
     sub.add_parser("version", help="catalog version and counts")
 

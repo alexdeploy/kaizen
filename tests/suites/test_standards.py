@@ -59,6 +59,7 @@ def run(r):
         return
     _check_rules(r, index, rules)
     _check_templates_against_surfaces(r, index, rules)
+    _check_analyze_integration(r, rules)
     _check_binary(r, rules)
 
 
@@ -255,6 +256,18 @@ def _check_rule_check(r, rid, check, check_types):
     if ctype == "grep":
         r.check(bool(check.get("include")), "%s declares include globs" % rid)
 
+    # A directory glob without a `**/` prefix anchors to the repository root, so
+    # in a workspace it silently matches nothing: `scripts/**` never excludes
+    # `backend/src/scripts/`. Found on a real monorepo, where TS-004 reported 36
+    # violations in CLI scripts it was supposed to be ignoring.
+    for key in ("include", "exclude"):
+        for pattern_glob in check.get(key, []):
+            r.check(
+                "/" not in pattern_glob or pattern_glob.startswith("**/"),
+                "%s %s glob works at any depth (%s)" % (rid, key, pattern_glob),
+                "prefix it with **/ or it only applies to a single-package layout",
+            )
+
 
 def _check_templates_against_surfaces(r, index, rules):
     """Markers in templates and surfaces in the index must agree, both ways."""
@@ -296,6 +309,78 @@ def _check_templates_against_surfaces(r, index, rules):
 
 
 # ----------------------------------------------------------------- binary ---
+
+
+def _check_analyze_integration(r, rules):
+    """/kaizen:analyze must verify rules FROM the catalog, not from a private copy.
+
+    Until v0.14 a convention's prose lived in a template and its check lived in
+    analyze/SKILL.md, joined by case-insensitive substring matching, so rewording
+    a convention silently disabled its verification. These checks exist so that
+    cannot come back.
+    """
+    path = os.path.join(P.SKILLS_DIR, "analyze", "SKILL.md")
+    if not r.check(os.path.isfile(path), "analyze/SKILL.md exists"):
+        return
+    text = P.read(path)
+
+    r.check(
+        "Bash(kaizen-standards *)" in text,
+        "analyze is allowed to run kaizen-standards",
+    )
+    r.check(
+        "kaizen-standards checks" in text,
+        "analyze gets its checks from the catalog",
+    )
+    r.check(
+        "kaizen-lock status" in text,
+        "analyze reads the lock, so it can report standards staleness",
+    )
+    r.check(
+        "--added-after" in text,
+        "analyze uses --added-after to find rules the project never had",
+    )
+
+    # The old private pattern table must not come back.
+    r.check(
+        "Convention keyword" not in text,
+        "analyze holds no private pattern table",
+        "checks belong to the rule they verify; a second copy drifts silently",
+    )
+
+    # Nor may it inline a catalog pattern, which is the same duplication by hand.
+    inlined = sorted({
+        rule["id"] for rule in rules
+        if rule.get("check", {}).get("pattern")
+        and rule["check"]["pattern"] in text
+    })
+    r.check(
+        not inlined,
+        "analyze does not inline any catalog check pattern",
+        "copied from the catalog: %s" % ", ".join(inlined),
+    )
+
+    # Every rule id named in the skill must be real, so documentation cannot
+    # reference a rule that was renamed or removed.
+    known = {rule["id"] for rule in rules}
+    referenced = set(re.findall(r"\b([A-Z]{2,4}-\d{3})\b", text))
+    unknown = sorted(referenced - known)
+    r.check(
+        not unknown,
+        "every rule id named in analyze/SKILL.md exists in the catalog",
+        "unknown: %s (use `<ID>` for illustrative examples)" % ", ".join(unknown),
+    )
+    r.check(
+        len(referenced) > 0,
+        "analyze/SKILL.md shows real rule ids in its report example",
+    )
+
+    # The three populations are the load-bearing distinction of this mode.
+    for population in ("catalog rule", "the user's own", "available, not adopted"):
+        r.check(
+            population in text,
+            "analyze documents the '%s' population" % population,
+        )
 
 
 def _check_binary(r, rules):

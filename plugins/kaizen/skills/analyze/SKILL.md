@@ -1,8 +1,8 @@
 ---
-description: Audit the project against its own CLAUDE.md and rules. Reports best-practice violations, documentation coverage gaps, and architecture drift. Read-only — never modifies code or config.
+description: Audit the project against its own CLAUDE.md and rules, verifying each rule with the check from the versioned standards catalog it came from. Reports violations by rule id with rationale and source, plus rules deprecated or newly available since the config was generated, documentation coverage gaps, and architecture drift. Read-only — never modifies code or config.
 disable-model-invocation: true
 argument-hint: "[--best-practices] [--coverage] [--architecture] [show]"
-allowed-tools: Read, Write, Glob, Grep, Bash(git status), Bash(git rev-parse *), Bash(git log *), Bash(test *), Bash(ls *), Bash(cat *), Bash(wc *), Bash(mkdir *)
+allowed-tools: Read, Write, Glob, Grep, Bash(kaizen-detect), Bash(kaizen-detect *), Bash(kaizen-standards *), Bash(kaizen-lock status), Bash(git status), Bash(git rev-parse *), Bash(git log *), Bash(test *), Bash(ls *), Bash(cat *), Bash(wc *), Bash(mkdir *)
 ---
 
 # /kaizen:analyze
@@ -53,41 +53,118 @@ Otherwise, print the file contents verbatim.
 
 ## Mode: `--best-practices`
 
-### Algorithm
+Every rule kaizen wrote into this project carries its catalog id as an HTML
+comment:
 
-1. **Read source documents**:
-   - `CLAUDE.md`
-   - All files in `.claude/rules/*.md`
+```markdown
+- **No `any`.** Use `unknown` and narrow. <!-- TS-003 -->
+```
 
-2. **Extract conventions** from sections that look like rules. Common section headings to scan:
-   - `## Conventions`
-   - `## Never do`
-   - `## Rules`
-   - `## Anti-patterns`
+That id is the whole point of this mode. It replaces what v0.4 did — matching a
+convention's *prose* against a hardcoded keyword table — which meant rewording a
+convention silently un-checked it, with no error anywhere. Now the rule and its
+check are the same object, joined by a stable id.
 
-   For each bullet under those headings, treat it as a potential convention.
+### Step 1 — establish context
 
-3. **Match each convention against the pattern library** below. If a convention matches a known pattern, run the check. If not, list it under "Unchecked (manual review)".
+```
+kaizen-detect
+kaizen-standards version
+kaizen-lock status
+```
 
-4. **Run each matched check** and list violations.
+From these you get the stack and maturity (to filter the catalog), the installed
+catalog version, and — if a lock exists — the `standards_version` the project's
+config was **generated** against. Keep both versions: their difference is the
+staleness report in step 5.
 
-### Built-in pattern library
+If `kaizen-standards` is unavailable, say so plainly and fall back to reading
+`CLAUDE.md` conventions as prose with **no** automated checks; report everything
+as unchecked. Never guess a rule's check from memory.
 
-These are the conventions kaizen can verify automatically in v0.4. Match by keyword (case-insensitive substring match against the convention text):
+### Step 2 — classify every convention in the project's config
 
-| Convention keyword | Check |
+Read `CLAUDE.md` and `.claude/rules/*.md`. For each bullet under `## Conventions`,
+`## Never do`, `## Never`, `## Rules` or `## Anti-patterns`, sort it into one of
+three populations. **These are different things and must never be mixed in the
+report.**
+
+| Population | How to tell | How to treat it |
+|---|---|---|
+| **A — catalog rule** | Line ends with `<!-- RULE-ID -->` | Verify with the catalog's own check. Report by id. |
+| **B — the user's own** | No id comment | **Not kaizen's to judge.** Try one exact-text match against catalog statements; if it matches, use that check and note it was matched by text. Otherwise: unchecked. |
+| **C — available, not adopted** | In the catalog for this stack/maturity, but no line in the config carries its id | Report as a gap, never as a violation. |
+
+Population B exists because most projects have hand-written conventions, and
+configs generated before ids existed. An exact statement match is deterministic
+and gets reported as such — it is not the old fuzzy substring matching, and it
+must not become that.
+
+### Step 3 — run the checks
+
+```
+kaizen-standards checks --stack <detect.stack> --maturity <detect.maturity>
+```
+
+Each entry carries `id`, `statement` and a `check`. Run only the checks whose id
+appeared in population A (or was text-matched in B).
+
+| `check.type` | How to run it |
 |---|---|
-| `named exports only`, `no default exports`, `no default export` | `Grep` for `^export default` in `.ts`/`.tsx`/`.js`/`.jsx`/`.vue`/`.svelte`. **Exception**: Vue SFCs and Svelte components where the default export is the component definition — these are idiomatic. If the convention explicitly mentions an SFC exception, skip Vue/Svelte files. |
-| `no console.log`, `no console.log in committed code` | `Grep` for `console\.log` in source files, excluding `**/*.test.*`, `**/*.spec.*`, `**/tests/**`. |
-| `no any`, `do not use any`, `forbid any` | `Grep` for `: any\b` and `\bas any\b` in `.ts`/`.tsx`. Exclude `node_modules`, `dist`, `*.d.ts` (declaration files often need `any`). |
-| `no eslint-disable`, `no eslint-disable without comment` | `Grep` for `eslint-disable`. For each match, check if the SAME line has a comment after it (`// reason`). Lines without justification are violations. |
-| `no print() for logging`, `use logging module` (Python) | `Grep` for `^\s*print\(` in `.py`, excluding `tests/**`, `scripts/**`, `__main__.py`. |
-| `no bare except`, `no bare except:` (Python) | `Grep` for `except\s*:\s*$` in `.py`. |
-| `from x import *`, `no wildcard imports` (Python) | `Grep` for `^from .* import \*` in `.py`. |
-| `mutable default arguments`, `no mutable default` (Python) | `Grep` for `def \w+\([^)]*=\s*\[\]` and `def \w+\([^)]*=\s*\{\}` in `.py`. |
-| `tests next to source` (TypeScript) | For each `.ts`/`.tsx` file (excluding `**/*.test.*`, `**/*.spec.*`, `tests/**`), check if a sibling `*.test.*` exists. List source files without adjacent tests as **partial coverage findings** (not violations, since not every file needs a test). |
+| `grep` | `Grep` with the rule's `pattern`, restricted to `include` globs, minus `exclude` globs. Every match is a violation. |
+| `sibling_file` | For each file matching `include` (minus `exclude`), check that a file matching `pattern` (with `{basename}` substituted) exists beside it. Report misses as **partial coverage**, not violations. |
+| `none` | Not runnable. Goes under "Unchecked" with the rule's own `reason`. |
 
-For each violation, output: `<file>:<line> — <violation text>`.
+Hard rules for running checks:
+
+- **Use the pattern exactly as the catalog gives it.** Do not "improve" it, widen
+  it, or translate it. If a pattern looks wrong, report that as a finding about
+  the catalog — do not silently substitute your own.
+- **Honour `include` and `exclude`.** A violation reported in `node_modules` or a
+  `.d.ts` destroys trust in the whole report.
+- **In a workspace** (`detect.workspaces.type != "none"`), run each check across
+  all members and attribute findings per package, so a monorepo report says
+  which package is affected.
+- **Bound the output**: more than 50 matches for one rule → report the count and
+  the first 20 with `... +N more`.
+- **Surface the check's own `note` when it has one.** Several patterns have known
+  false positives — a regex has no idea whether a match sits inside a comment or
+  a string. Print the note under the rule's findings so the reader can dismiss
+  what should be dismissed. Hiding a known limitation to make a report look
+  cleaner is the fastest way to make the next report worthless.
+- **Show enough context to judge a match**: the matching line, not just the line
+  number.
+
+### Step 4 — enrich each violation with its provenance
+
+For every rule that produced findings, you already have `statement`, `severity`,
+`rationale` and `sources` from the catalog. Include the first sentence of the
+rationale and the first source link. **This is the difference between "you broke
+a rule" and "here is why this rule exists and where it comes from"** — and it is
+free, because the data is in the object you already read.
+
+Do not paraphrase a rationale. Quote it or trim it to its first sentence.
+
+### Step 5 — standards staleness
+
+Two questions, both answerable from the catalog:
+
+1. **Deprecated or vanished rules.** For each id in population A, look it up
+   (`kaizen-standards show <ID>`). If `status` is `deprecated`, report it with
+   its `deprecated_by` successor. If the id does not exist in the catalog at all,
+   report it as removed — the config predates a catalog change, or the id was
+   hand-edited.
+2. **Rules added since this config was generated.** If the lock recorded a
+   `standards_version`:
+   ```
+   kaizen-standards list --stack <stack> --maturity <maturity> --added-after <lock standards_version> --json
+   ```
+   Everything returned is a rule the project never had the chance to adopt.
+
+Both belong under a `### Standards status` heading, not under violations. A
+missing rule is not a violation of anything.
+
+If there is no lock, say so: staleness cannot be computed, only population C.
 
 ### Report section
 
@@ -96,26 +173,73 @@ Output format under `## Best practices`:
 ```markdown
 ## Best practices
 
-### N violations of "<convention text>" (<source: CLAUDE.md:line OR .claude/rules/X.md:line>)
-- `src/path/foo.ts:42` — <one-line context>
-- `src/path/bar.ts:108`
-- ... (truncate to first 20 with "... +N more" if huge)
+### Standards status
 
-### N violations of "<next convention>"
-...
+| | |
+|---|---|
+| Config generated against | standards@2026.08 (from `.claude/kaizen/lock.json`) |
+| Catalog installed | standards@2026.09 |
+| Stack / maturity used | `backend-node,frontend,typescript` / `mature` |
 
-### Unchecked conventions (manual review)
-- "<convention text>" — kaizen v0.4 has no automated check for this. Source: CLAUDE.md:N
-- ...
+- **2 rules added since your config was generated** — `<ID>`, `<ID>`.
+  Run `/kaizen:upgrade` to adopt them.
+- **1 rule in your config is deprecated** — `<ID>`, superseded by `<ID>`.
+- **0 rules in your config are unknown to the catalog.**
+
+(Omit any bullet that is zero. If there is no lock, replace the first two rows
+with: `Config generated against | unknown (no lock file — run /kaizen:init to start tracking)`.)
+
+### Violations
+
+#### [safety] PY-008 — No bare `except:`
+`backend/src/features/scan/ocr.py:142`
+`backend/src/features/scan/ocr.py:207`
+> A bare except also catches `KeyboardInterrupt` and `SystemExit`, so it makes a
+> program that cannot be stopped.
+Source: PEP 8 — Programming Recommendations · https://peps.python.org/pep-0008/#programming-recommendations
+
+#### [convention] TS-003 — No `any`
+`frontend/src/services/api.ts:88` (matched `: any`)
+... +14 more
+> `any` disables checking for every expression it touches, and it spreads.
+Source: TypeScript Handbook — unknown · https://www.typescriptlang.org/docs/handbook/2/functions.html#unknown
+
+(Order: severity first — security, safety, convention — then by id.)
+
+### Partial coverage
+
+- **TS-002** (tests next to source): 34 of 41 source files have no adjacent test.
+  Not a violation; not every file warrants one.
+
+### Available but not adopted
+
+- **TS-009** (safety) — No tests that depend on real wall-clock time without
+  freezing it. Added 2026-08-05, applies to this stack, not present in your config.
+
+### Unchecked (manual review)
+
+**Your own conventions** (no catalog id — kaizen does not judge these):
+- "Nunca usar `lean()` sin proyección explícita en rutas multi-tenant." — CLAUDE.md:48
+
+**Catalog rules with no mechanical check:**
+- **UNI-001** — requires branch protection state, not file content.
+- **PY-001** — coverage of hints is mypy's job, not a grep's.
+
+**Matched by text, not by id** (consider `/kaizen:upgrade` so these carry ids):
+- "No `console.log` in committed code." → TS-004
 
 ### Summary
-- <N> conventions checked
-- <M> violations across <K> files
-- <U> conventions unchecked
+- <N> catalog rules verified, <M> violations across <K> files
+- <P> partial-coverage findings
+- <U> conventions unchecked (<U1> yours, <U2> not mechanically checkable)
+- Standards: <added> newer rules available, <dep> deprecated in use
 ```
 
----
+**Never report a population C rule as a violation**, and never present a
+hand-written convention of the user's as a kaizen standard. Those two mistakes
+turn a useful audit into an argument.
 
+---
 ## Mode: `--coverage`
 
 ### Algorithm
@@ -164,6 +288,12 @@ Output format under `## Best practices`:
 2. **Parse listed directories**: lines like `` - `src/<dir>/` — <purpose> ``. Build a set `documented_dirs`.
 
 3. **List actual directories**: `Glob` for `src/*/`. Build a set `actual_dirs`.
+
+   **In a workspace** (`kaizen-detect` reports `workspaces.type != "none"`): there
+   is usually no root `src/`. Glob `<package>/src/*/` for each package in
+   `workspaces.packages` instead, and keep the package prefix in the set so the
+   comparison against the documented list is like-for-like. Globbing a root
+   `src/` that does not exist would report every documented directory as missing.
 
 4. **Compute three sets**:
    - `documented_dirs - actual_dirs` → **listed but missing** (deleted or renamed dirs still in docs)
@@ -270,7 +400,10 @@ Omit lines for modes not run.
 - **NEVER modify CLAUDE.md, .claude/rules/*, source code, or any other file** other than `.claude/kaizen/analyze-report.md` and (one-time) `.gitignore`.
 - **NEVER auto-fix violations.** Surface only. If the user wants to act, they edit code or invoke `/kaizen:learn` to update conventions.
 - **NEVER invent violations.** Every finding must point to a real file:line with a real match. If a Grep returns nothing, the count is zero — don't pad.
-- **NEVER claim a convention is checked when it isn't.** If a convention doesn't match the pattern library, list it under "Unchecked" with the exact convention text.
+- **NEVER claim a convention is checked when it isn't.** A convention with no catalog id and no exact text match goes under "Unchecked" with its exact text.
+- **NEVER invent or adjust a check.** Patterns come from the catalog verbatim. If one looks wrong, report that as a finding about the catalog.
+- **NEVER judge a convention the user wrote themselves** against catalog rules. Population B is theirs.
+- **NEVER report an unadopted catalog rule as a violation.** A rule the project never had is a gap, not a breach.
 - **NEVER read files outside cwd.** All Glob/Read calls scoped to the project root.
 - **NEVER commit anything.**
 - **Bound the work**: if a Grep returns more than 50 matches for a single check, report the count and the first 20 with a "+N more" line. Don't dump huge lists.
@@ -293,7 +426,10 @@ Omit lines for modes not run.
 ## Why this design
 
 - **Read-only is a feature, not a limitation.** `/analyze` is the diagnostic; the user (or `/learn`) is the surgeon. Coupling diagnosis with fixes is how tools become bossy.
-- **Pattern library over LLM grep.** Checking "no console.log" should be a `Grep` for `console\.log`, not "Claude reads every file and decides". The pattern library is auditable and fast.
+- **Deterministic checks over LLM grep.** A rule like "no logging calls in committed code" is verified by running the catalog's pattern through `Grep`, not by "Claude reads every file and decides". Auditable, fast, and reproducible. (The patterns themselves live in the catalog and appear nowhere in this file — see the harness check that enforces it.)
+- **The rule and its check are one object.** Until v0.14 the convention's prose lived in a template and its check lived in this file, joined by case-insensitive substring matching — so rewording a convention silently disabled its verification, with no error anywhere. Now both come from the catalog, joined by a stable id.
+- **Provenance is free, so it is mandatory.** The catalog entry already carries the rationale and the source, so every violation reports *why the rule exists*, not just that it was broken. A finding a developer can evaluate is a finding they might act on.
+- **Three populations, never mixed.** Catalog rules kaizen wrote, conventions the user wrote, and catalog rules not yet adopted are three different things. Presenting a user's own rule as a kaizen standard, or an unadopted rule as a violation, turns an audit into an argument.
 - **Unchecked conventions are explicit.** Rather than silently skipping conventions kaizen can't verify, list them. The user knows what's checked and what isn't.
 - **Per-mode reports, single output file.** One report file at `.claude/kaizen/analyze-report.md` makes the output discoverable, shareable (paste to a teammate), and persistent.
 - **No `apply`/`discard` state machine.** Unlike `/learn`, `/analyze` doesn't propose mutations. The report is the artifact. State machines exist only where there's mutation to gate.
